@@ -1,6 +1,6 @@
 
 function baseline-oracle-intent-kb {
-    python main.py \
+    WANDB_MODE=disabled python main.py \
         --learning-rate $1 \
         --batch-size $2 \
         --epoch 21 --use-intent --use-kb \

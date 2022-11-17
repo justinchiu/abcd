@@ -158,7 +158,7 @@ class CascadeDialogSuccess(CoreModel):
         intent_score = self.intent_projection(pooled_history)
         nextstep_score = self.nextstep_projection(pooled_history)
         action_score = self.action_projection(pooled_history)
-        enum_prob = self.enum_projection(pooled_history)
+        enum_score = self.enum_projection(pooled_history)
 
         encoded_history = pooled_history.unsqueeze(1)  # (batch_size, 1, hidden_dim)
         projected_history = self.context_linear(encoded_history)  # (batch_size, 1, 128)
@@ -201,9 +201,9 @@ class CascadeDialogSuccess(CoreModel):
         gate_logprob = torch.nn.functional.logsigmoid(gate_score)
         # log 1-sigmoid(x) = -x + logsigmoid(x)
         ngate_logprob = -gate_score + gate_logprob
-        enum_score = gate_logprob + enum_prob.log_softmax(-1)  # batch_size x 125
-        copy_score =  ngate_logprob + copy_prob.log_softmax(-1)  # batch_size x 100
-        value_score = torch.cat([enum_score, copy_score], dim=1)  # batch_size x 225
+        enum_prob = gate_logprob + enum_score.log_softmax(-1)  # batch_size x 125
+        copy_prob =  ngate_logprob + copy_score.log_softmax(-1)  # batch_size x 100
+        value_score = torch.cat([enum_prob, copy_prob], dim=1)  # batch_size x 225
         # ^ locally normalized
 
         return intent_score, nextstep_score, action_score, value_score, utt_score

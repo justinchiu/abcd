@@ -63,7 +63,11 @@ def cds_loss(scores, targets, loss_func):
     intent_loss = loss_func(intent_scores, intent_target)
     nextstep_loss = loss_func(nextstep_scores, nextstep_target)
     action_loss = loss_func(action_scores, action_target)
-    value_loss = loss_func(value_scores, value_target)
+    value_loss = (
+        loss_func(value_scores, value_target)
+        if (value_target != -1).any()
+        else 0.0
+    )
 
     #utt_target_ids = utterance_target.unsqueeze(1)  # batch_size, 1
     #chosen = torch.gather(utt_scores, dim=1, index=utt_target_ids)
