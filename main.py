@@ -69,6 +69,7 @@ def cds_loss(scores, targets, loss_func):
     chosen = torch.gather(utt_scores, dim=1, index=utt_target_ids)
     correct = chosen.sum()  # scalar
 
+    # TODO: just use logsumexp
     shift = torch.max(utt_scores)  # perform log sum exp of the incorrect scores
     res = torch.exp(utt_scores - shift)  # batch_size, num_candidates
     res = torch.log(torch.sum(res, dim=1))  # batch_size
@@ -197,9 +198,9 @@ if __name__ == "__main__":
     set_seed(args)
 
     wandb.init(
-        project = "abcd",
-        name = args.wandb_name + args.prefix,
-    ) 
+        project="abcd",
+        name=args.wandb_name + args.prefix,
+    )
 
     ckpt_dir, cache_results = check_directories(args)
     raw_data = load_data(args, cache_results[1])
