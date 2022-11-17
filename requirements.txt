@@ -1,7 +1,9 @@
 tqdm
+rich
 transformers
 tensorboardX
 pandas
 scikit-learn
 GPUtil
 black
+wandb

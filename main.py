@@ -3,8 +3,9 @@ import random
 import numpy as np
 import torch
 from tqdm import tqdm as progress_bar
+import wandb
 
-from utils.arguments import solicit_params
+from utils.arguments import get_args
 from utils.help import set_seed, setup_gpus, check_directories, prepare_inputs, device
 from utils.load import (
     load_data,
@@ -191,9 +192,14 @@ def run_eval(args, datasets, model, exp_logger, kb_labels, split="dev"):
 
 
 if __name__ == "__main__":
-    args = solicit_params()
+    args = get_args()
     args = setup_gpus(args)
     set_seed(args)
+
+    wandb.init(
+        project = "abcd",
+        name = args.wandb_name + args.prefix,
+    ) 
 
     ckpt_dir, cache_results = check_directories(args)
     raw_data = load_data(args, cache_results[1])

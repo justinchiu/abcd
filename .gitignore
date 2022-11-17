@@ -1,8 +1,11 @@
 outputs/
-scripts/
 data/cache/
 data/raw/
 results/
+wandb/
+
+data/abcd_v1.1.json
+data/utt_vectors.pt
 
 .DS_Store
 __pycache__/

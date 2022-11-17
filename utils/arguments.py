@@ -1,7 +1,7 @@
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 
-def solicit_params():
+def get_args():
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument("--seed", help="Random seed", type=int, default=14)
     parser.add_argument(
@@ -56,6 +56,12 @@ def solicit_params():
         default=False,
         action="store_true",
         help="Filter for just errors during evaluation",
+    )
+    parser.add_argument(
+        "--wandb_name",
+        type=str,
+        default="baseline",
+        help="wandb prefix",
     )
 
     # ------ TRAINING AND EVALUATION --------
