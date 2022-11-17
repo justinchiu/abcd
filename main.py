@@ -65,17 +65,14 @@ def cds_loss(scores, targets, loss_func):
     action_loss = loss_func(action_scores, action_target)
     value_loss = loss_func(value_scores, value_target)
 
-    utt_target_ids = utterance_target.unsqueeze(1)  # batch_size, 1
-    chosen = torch.gather(utt_scores, dim=1, index=utt_target_ids)
-    correct = chosen.sum()  # scalar
+    #utt_target_ids = utterance_target.unsqueeze(1)  # batch_size, 1
+    #chosen = torch.gather(utt_scores, dim=1, index=utt_target_ids)
+    chosen = utt_scores[torch.arange(batch_size), utterance_target]
+    correct = chosen.mean()
+    #correct = chosen.sum()  # scalar
 
-    # TODO: just use logsumexp
-    shift = torch.max(utt_scores)  # perform log sum exp of the incorrect scores
-    res = torch.exp(utt_scores - shift)  # batch_size, num_candidates
-    res = torch.log(torch.sum(res, dim=1))  # batch_size
-    incorrect = torch.sum(
-        shift + res
-    )  # add the shift back in to complete the log-sum-exp overflow trick
+    res = utt_scores.logsumexp(1)
+    incorrect = res.mean()
     utt_loss = incorrect - correct
 
     total_loss = intent_loss + nextstep_loss + action_loss + value_loss + utt_loss
@@ -199,7 +196,7 @@ if __name__ == "__main__":
 
     wandb.init(
         project="abcd",
-        name=args.wandb_name + args.prefix,
+        name=f"{args.wandb_name}-{args.model_type}-{args.filename}-{args.prefix}",
     )
 
     ckpt_dir, cache_results = check_directories(args)

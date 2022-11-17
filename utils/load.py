@@ -44,8 +44,12 @@ def load_tokenizer(args):
         tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
     elif args.model_type == "roberta":
         tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
+    elif args.model_type == "roberta-large":
+        tokenizer = RobertaTokenizer.from_pretrained("roberta-large")
     elif args.model_type == "albert":
         tokenizer = AlbertTokenizer.from_pretrained("albert-base-v2")
+    else:
+        raise ValueError(f"Unrecognized model type {args.model_type} when loading tokenizer")
 
     tokenizer.add_tokens(special)
     return tokenizer, ontology

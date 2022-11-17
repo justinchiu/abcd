@@ -6,7 +6,7 @@ def get_args():
     parser.add_argument("--seed", help="Random seed", type=int, default=14)
     parser.add_argument(
         "--model-type",
-        choices=["roberta", "bert", "dialogpt", "albert"],
+        choices=["roberta", "roberta-large", "bert", "dialogpt", "albert"],
         help="Which type of encoder and tokenizer to use",
         default="bert",
     )
@@ -58,7 +58,7 @@ def get_args():
         help="Filter for just errors during evaluation",
     )
     parser.add_argument(
-        "--wandb_name",
+        "--wandb-name",
         type=str,
         default="baseline",
         help="wandb prefix",
