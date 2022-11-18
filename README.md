@@ -3,12 +3,11 @@ This respository contains the code and data for ABCD ([Chen](https://twitter.com
 
 ## Commands
 
-'''
-source scripts/jc_run.sh && baselline-oracle-intent-kb $lr $bsz
-source scripts/jc_run.sh && baselline-oracle-intent-kb 1e-4 64
-source scripts/jc_run_sh && sweep-baseline-lr1
-source scripts/jc_run_sh && sweep-baseline-lr2
-'''
+```
+source scripts/jc_run.sh && baseline-oracle-intent-kb $lr $bsz
+source scripts/jc_run.sh && baseline-oracle-intent-kb 3e-5 12
+source scripts/jc_run.sh && baseline-oracle-intent-kb 1e-4 64
+```
 
 ## Introduction
 
