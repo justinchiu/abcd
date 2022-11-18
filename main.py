@@ -43,12 +43,13 @@ def run_main(args, datasets, model, exp_logger):
 def ast_loss(scores, targets, loss_func):
     action_score, value_score = scores
     action_target, value_target = targets
+    batch_size = action_score.shape[0]
 
     action_loss = loss_func(action_score, action_target)
     value_loss = loss_func(value_score, value_target)
 
     total_loss = action_loss + value_loss
-    return total_loss
+    return total_loss / batch_size
 
 
 def cds_loss(scores, targets, loss_func):
@@ -63,24 +64,20 @@ def cds_loss(scores, targets, loss_func):
     intent_loss = loss_func(intent_scores, intent_target)
     nextstep_loss = loss_func(nextstep_scores, nextstep_target)
     action_loss = loss_func(action_scores, action_target)
-    value_loss = (
-        loss_func(value_scores, value_target)
-        if (value_target != -1).any()
-        else 0.0
-    )
+    value_loss = loss_func(value_scores, value_target)
 
     #utt_target_ids = utterance_target.unsqueeze(1)  # batch_size, 1
     #chosen = torch.gather(utt_scores, dim=1, index=utt_target_ids)
     chosen = utt_scores[torch.arange(batch_size), utterance_target]
-    correct = chosen.mean()
-    #correct = chosen.sum()  # scalar
+    #correct = chosen.mean()
+    correct = chosen.sum()  # scalar
 
     res = utt_scores.logsumexp(1)
-    incorrect = res.mean()
+    incorrect = res.sum()
     utt_loss = incorrect - correct
 
     total_loss = intent_loss + nextstep_loss + action_loss + value_loss + utt_loss
-    return total_loss
+    return total_loss / batch_size
 
 
 def run_train(args, datasets, model, exp_logger, kb_labels):
@@ -91,7 +88,7 @@ def run_train(args, datasets, model, exp_logger, kb_labels):
     exp_logger.start_train(num_examples, total_step=t_total)
     optimizer = get_optimizer(args, model)
     scheduler = get_scheduler(args, optimizer, t_total)
-    loss_func = torch.nn.CrossEntropyLoss(ignore_index=-1)
+    loss_func = torch.nn.CrossEntropyLoss(ignore_index=-1, reduction="sum")
     model.zero_grad()
 
     for epoch in range(args.epochs):
@@ -139,7 +136,7 @@ def run_train(args, datasets, model, exp_logger, kb_labels):
 def run_eval(args, datasets, model, exp_logger, kb_labels, split="dev"):
     dataloader, num_examples = setup_dataloader(datasets, args.batch_size, split)
     exp_logger.start_eval(num_examples, kind=args.filename)
-    loss_func = torch.nn.CrossEntropyLoss(ignore_index=-1)
+    loss_func = torch.nn.CrossEntropyLoss(ignore_index=-1, reduction="sum")
     num_outputs = len(model.outputs)
     model.eval()
 
