@@ -196,6 +196,8 @@ class CascadeDialogSuccess(CoreModel):
         #copy_score = (1 - gate) * copy_prob  # batch_size x 100
         #value_score = torch.cat([enum_score, copy_score], dim=1)  # batch_size x 225
 
+        """
+        # this works ok, but value accuracy was really low
         gate_score = self.gating_mechanism(joined)
         # logsigmoid(x)
         gate_logprob = torch.nn.functional.logsigmoid(gate_score)
@@ -205,5 +207,10 @@ class CascadeDialogSuccess(CoreModel):
         copy_prob =  ngate_logprob + copy_score.log_softmax(-1)  # batch_size x 100
         value_score = torch.cat([enum_prob, copy_prob], dim=1)  # batch_size x 225
         # ^ locally normalized
+        """
+        gate_score = self.gating_mechanism(joined)
+        value_score = torch.cat([
+            enum_score - gate_score, copy_score + gate_score
+        ], dim=1)  # batch_size x 225
 
         return intent_score, nextstep_score, action_score, value_score, utt_score
