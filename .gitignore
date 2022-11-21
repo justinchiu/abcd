@@ -6,6 +6,7 @@ wandb/
 
 data/abcd_v1.1.json
 data/utt_vectors.pt
+cache/
 
 .DS_Store
 __pycache__/

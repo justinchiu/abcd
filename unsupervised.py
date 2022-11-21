@@ -6,8 +6,8 @@ from tqdm import tqdm
 import wandb
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
-# from dataset import prepare_fever, FeverDataset
-from dataset import prepare_abcd, AbcdDataset
+# from dataset import collect_fever_docs, prepare_fever, FeverDataset
+from eba_dataset import prepare_abcd, AbcdDataset
 from transformers import AutoModel, AutoModelForSeq2SeqLM
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 from transformers import get_scheduler, set_seed
@@ -17,8 +17,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch import nn
-from utils import get_args, load_hotpotqa, mean_pooling, padding, normalize_answer
-from utils import (
+from eba_utils import get_args, load_hotpotqa, mean_pooling, padding, normalize_answer
+from eba_utils import (
     prepare_linear,
     prepare_optim_and_scheduler,
     padding,
@@ -76,7 +76,6 @@ class DataCollatorForMultipleChoice:
 
 def prepare_dataloader(tok, answ_tok, args):
     # docs = collect_fever_docs()
-    # docs are loaded with examples in abcd
     data_collator = DataCollatorForMultipleChoice(
         tok, padding="longest", max_length=512
     )

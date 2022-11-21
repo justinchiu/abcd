@@ -179,6 +179,8 @@ if __name__ == "__main__":
 
         print("Avg x len")
         print(np.mean([len(x.split()) for d in examples for x in d["xs"]]))
+        print("Max x len")
+        print(np.max([len(x.split()) for d in examples for x in d["xs"]]))
 
         print("Avg z len")
         print(np.mean([
@@ -186,4 +188,24 @@ if __name__ == "__main__":
             for flow, subflow_dict in split_manual.items()
             for subflow, sents in subflow_dict.items()
             for sent in sents
+        ]))
+        print("Max z len")
+        print(np.max([
+            len(sent.split())
+            for flow, subflow_dict in split_manual.items()
+            for subflow, sents in subflow_dict.items()
+            for sent in sents
+        ]))
+
+        print("Avg d len")
+        print(np.mean([
+            len(" ".join(sents).split())
+            for flow, subflow_dict in split_manual.items()
+            for subflow, sents in subflow_dict.items()
+        ]))
+        print("Max d len")
+        print(np.max([
+            len(" ".join(sents).split())
+            for flow, subflow_dict in split_manual.items()
+            for subflow, sents in subflow_dict.items()
         ]))
