@@ -4,8 +4,16 @@ from itertools import combinations, product
 import json
 import pickle
 import random
+from rich.progress import track
 import os
 import torch
+
+
+def len_helper(l):
+    l.insert(0, 0)
+    for i in range(1, len(l)):
+        l[i] += l[i-1]
+    return l
 
 
 def preprocess_fever(examples, tok, answ_tok, fixed, max_e):
@@ -59,6 +67,63 @@ def preprocess_fever(examples, tok, answ_tok, fixed, max_e):
     tokenized_supps = [
         tokenized_supps[slengths[i] : slengths[i + 1]] for i in range(len(slengths) - 1)
     ]
+    assert len(tokenized_supps) == len(tokenized_answers) == len(tokenized_sents)
+    return tokenized_sents, tokenized_supps, tokenized_answers, ds, num_s
+
+def preprocess_abcd(examples, tok, answ_tok, fixed, max_e):
+    sents = []
+    supps = []
+    lengths = []
+    slengths = []
+    ds = []
+    num_s = []
+    for e in track(examples):
+        # add all singletons, consec pairs, consec triples
+        x = e["x"]
+        sentences = e["z"]
+        sentences1 = [f"{x} {tok.unk_token} {a}" for a in sentences]
+        sentences2 = [
+            f"{x} {tok.unk_token} {a} {tok.unk_token} {b}"
+            for a, b in zip(sentences, sentences[1:])
+        ]
+        sentences3 = [
+            f"{x} {tok.unk_token} {a} {tok.unk_token} {b} {tok.unk_token} {c}"
+            for a, b, c in zip(sentences, sentences[1:], sentences[2:])
+        ]
+
+        # this encoding is used for p(z|x)
+        curr_sents = sentences1
+        # this encoding is used for p(y|x,z)
+        curr_supps = sentences1 + sentences2 + sentences3
+        curr_supps = sentences1 #+ sentences2 + sentences3
+
+        # aggregate flattened text
+        sents += curr_sents
+        supps += curr_supps
+
+        # record lengths to unflatten
+        lengths.append(len(curr_sents))
+        slengths.append(len(curr_supps))
+
+    lengths = len_helper(lengths)
+    slengths = len_helper(slengths)
+
+    print(f"len(sents):{len(sents)}")
+    print(f"len(supps):{len(supps)}")
+
+    tokenized_sents = tok(sents, truncation=True, return_attention_mask=False)[
+        "input_ids"
+    ]
+    tokenized_sents = [tokenized_sents[lengths[i]:lengths[i+1]] for i in range(len(lengths)-1)]
+    answers = [e["y"] for e in examples]
+    tokenized_answers = answ_tok(answers, truncation=True, return_attention_mask=False)[
+        "input_ids"
+    ]
+    tokenized_supps = answ_tok(supps, truncation=True, return_attention_mask=False)[
+        "input_ids"
+    ]
+    tokenized_supps = [tokenized_supps[slengths[i]:slengths[i+1]] for i in range(len(slengths)-1)]
+    #import pdb; pdb.set_trace()
     assert len(tokenized_supps) == len(tokenized_answers) == len(tokenized_sents)
     return tokenized_sents, tokenized_supps, tokenized_answers, ds, num_s
 
@@ -146,49 +211,26 @@ def prepare_abcd(tokenizer, answer_tokenizer, split, fixed, max_e, path="eba_dat
     labels = []
     sent_labels = []
     for conversation in data:
-        xs, ys, z = conversation
+        xs = conversation["xs"]
+        ys = conversation["ys"]
+        z = conversation["z"]
+        id = conversation["id"]
         for x, y in zip(xs, ys):
             out.append(
                 {
                     "x": x,
                     "y": y,
                     "z": z,
+                    "id": id,
                 }
             )
-        import pdb
 
-        pdb.set_trace()
-
-    for d in data:
-        curr = dict()
-        curr["x"] = (
-            "A claim to be investigated is that "
-            + d["query"]
-            + " We have following facts: "
-        )
-        d["evidences"] = [ee for e in d["evidences"] for ee in e]
-        docid = [l["docid"] for l in d["evidences"]]
-        docid = set(docid)
-        assert len(docid) == 1
-        docid = docid.pop()
-        curr["z"] = docs[docid]
-        gold_z = [l["start_sentence"] for l in d["evidences"]]
-        sent_labels.append(gold_z)
-        curr["y"] = d["classification"].lower()
-        curr["y"] = (
-            "The claim is thus supported."
-            if curr["y"] == "supports"
-            else "The claim is thus refuted."
-        )
-        label = 0 if "supported" in curr["y"] else 1
-        labels.append(label)
-        out.append(curr)
-    fname = f"cache/fever_new_tok_{split}.pkl"
+    fname = f"cache/abcd_new_tok_{split}.pkl"
     if os.path.isfile(fname):
         with open(fname, "rb") as f:
             sents, supps, answs, ds, num_s = pickle.load(f)
     else:
-        sents, supps, answs, ds, num_s = preprocess_fever(
+        sents, supps, answs, ds, num_s = preprocess_abcd(
             out, tokenizer, answer_tokenizer, fixed, max_e
         )
         with open(fname, "wb") as f:
