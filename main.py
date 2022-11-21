@@ -31,7 +31,7 @@ def run_main(args, datasets, model, exp_logger):
         kb_labels["intent"] = list(model.mappings["intent"].keys())
         kb_labels["action"] = list(model.mappings["action"].keys())
 
-    exp_logger.init_tb_writers()
+    #exp_logger.init_tb_writers()
     run_train(args, datasets, model, exp_logger, kb_labels)
 
     if args.do_eval:

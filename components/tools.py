@@ -3,7 +3,7 @@ import logging
 import numpy as np
 
 import wandb
-from tensorboardX import SummaryWriter
+#from tensorboardX import SummaryWriter
 from torch.optim.optimizer import Optimizer, required
 from transformers import AdamW, get_linear_schedule_with_warmup
 
@@ -78,8 +78,9 @@ class ExperienceLogger(object):
         self.add_scalar("dev", metric.lower(), value, self.global_step)
 
     def init_tb_writers(self):
-        self.train_writer = SummaryWriter(log_dir=self.output_dir + "/train")
-        self.dev_writer = SummaryWriter(log_dir=self.output_dir + "/dev")
+        raise NotImplementedError
+        #self.train_writer = SummaryWriter(log_dir=self.output_dir + "/train")
+        #self.dev_writer = SummaryWriter(log_dir=self.output_dir + "/dev")
 
     def add_scalar(self, mode, name, value, step):
         wandb.log(
@@ -88,10 +89,10 @@ class ExperienceLogger(object):
             },
             step=step,
         )
-        if mode == "train":
-            self.train_writer.add_scalar(name, value, step)
-        elif mode == "dev":
-            self.dev_writer.add_scalar(name, value, step)
+        #if mode == "train":
+            #self.train_writer.add_scalar(name, value, step)
+        #elif mode == "dev":
+            #self.dev_writer.add_scalar(name, value, step)
 
 
 # TODO: AdamW
