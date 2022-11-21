@@ -50,6 +50,7 @@ def preprocess_fever(examples, tok, answ_tok, fixed, max_e):
         num_s.append(z_len)
     lengths = len_helper(lengths)
     slengths = len_helper(slengths)
+
     # there is one example that has a length 529, might cause an error
     tokenized_sents = tok(sents, truncation=True, return_attention_mask=False)[
         "input_ids"
@@ -110,6 +111,8 @@ def preprocess_abcd(examples, tok, answ_tok, fixed, max_e):
 
     print(f"len(sents):{len(sents)}")
     print(f"len(supps):{len(supps)}")
+
+    import pdb; pdb.set_trace()
 
     tokenized_sents = tok(sents, truncation=True, return_attention_mask=False)[
         "input_ids"

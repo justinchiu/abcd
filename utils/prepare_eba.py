@@ -87,7 +87,7 @@ def convert_example(
         f"{speaker.lower()}: {utt.lower()}" for speaker, utt in example["original"]
     ]
     dialogue = [cls_token] + action_texts
-    histories = [" ".join(dialogue[: i + 1]) for i in range(len(dialogue) - 1)]
+    histories = [f" {sep_token} ".join(dialogue[: i + 1]) for i in range(len(dialogue) - 1)]
     xs = histories
 
     # TODO: check how colons get split using tokenizer
