@@ -151,10 +151,10 @@ class CascadeDialogSuccess(CoreModel):
 
         history_outputs = self.encoder(**full_history)  # batch_size x 768
         pooled_history = history_outputs.pooler_output
-        #intent_score = self.softmax(self.intent_projection(pooled_history))
-        #nextstep_score = self.softmax(self.nextstep_projection(pooled_history))
-        #action_score = self.softmax(self.action_projection(pooled_history))
-        #enum_prob = self.softmax(self.enum_projection(pooled_history))
+        # intent_score = self.softmax(self.intent_projection(pooled_history))
+        # nextstep_score = self.softmax(self.nextstep_projection(pooled_history))
+        # action_score = self.softmax(self.action_projection(pooled_history))
+        # enum_prob = self.softmax(self.enum_projection(pooled_history))
         intent_score = self.intent_projection(pooled_history)
         nextstep_score = self.nextstep_projection(pooled_history)
         action_score = self.action_projection(pooled_history)
@@ -178,11 +178,11 @@ class CascadeDialogSuccess(CoreModel):
 
         utt_score = torch.bmm(projected_history, candidates)
         utt_score = utt_score.squeeze(1)  # (batch_size, num_candidates)
-        #utt_score = self.softmax(utt_score)  # normalize into probabilities
+        # utt_score = self.softmax(utt_score)  # normalize into probabilities
 
         context_outputs = self.encoder(**context_tokens)
         pooled_context = context_outputs.pooler_output
-        copy_score = self.copy_projection(pooled_context) # batch_size x 100
+        copy_score = self.copy_projection(pooled_context)  # batch_size x 100
         reverse_copy_proj = self.copy_projection.weight.t()
         copy_context = torch.matmul(
             pooled_context, reverse_copy_proj
@@ -191,10 +191,10 @@ class CascadeDialogSuccess(CoreModel):
             [pooled_context, copy_context], dim=1
         )  # batch_size x 768+100
 
-        #gate = self.sigmoid(self.gating_mechanism(joined))  # batch_size x 1
-        #enum_score = gate * enum_prob  # batch_size x 125
-        #copy_score = (1 - gate) * copy_prob  # batch_size x 100
-        #value_score = torch.cat([enum_score, copy_score], dim=1)  # batch_size x 225
+        # gate = self.sigmoid(self.gating_mechanism(joined))  # batch_size x 1
+        # enum_score = gate * enum_prob  # batch_size x 125
+        # copy_score = (1 - gate) * copy_prob  # batch_size x 100
+        # value_score = torch.cat([enum_score, copy_score], dim=1)  # batch_size x 225
 
         """
         # this works ok, but value accuracy was really low
@@ -208,9 +208,9 @@ class CascadeDialogSuccess(CoreModel):
         value_score = torch.cat([enum_prob, copy_prob], dim=1)  # batch_size x 225
         # ^ locally normalized
         """
-        gate_score = self.gating_mechanism(joined)
-        value_score = torch.cat([
-            enum_score - gate_score, copy_score + gate_score
-        ], dim=1)  # batch_size x 225
+        gate_score = self.gating_mechanism(joined)  # batch_size x 1
+        value_score = torch.cat(
+            [enum_score - gate_score, copy_score + gate_score], dim=1
+        )  # batch_size x 225
 
         return intent_score, nextstep_score, action_score, value_score, utt_score

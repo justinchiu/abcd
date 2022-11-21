@@ -87,8 +87,8 @@ def convert_example(
         f"{speaker.lower()}: {utt.lower()}" for speaker, utt in example["original"]
     ]
     dialogue = [cls_token] + action_texts
-    histories = [" ".join(dialogue[:i+1]) for i in range(len(dialogue)-1)]
-    x = histories
+    histories = [" ".join(dialogue[: i + 1]) for i in range(len(dialogue) - 1)]
+    xs = histories
 
     # TODO: check how colons get split using tokenizer
     actions = []
@@ -101,21 +101,28 @@ def convert_example(
             values = ", ".join(values)
             actions.append(f"{slot}: {values}")
         elif nextstep == "end_conversation":
-            import pdb; pdb.set_trace()
+            import pdb
+
+            pdb.set_trace()
         else:
             actions.append(None)
-    y = actions
+    ys = actions
 
     flow = example["scenario"]["flow"]
     subflow = example["scenario"]["subflow"]
-    #if subflow in ["status_delivery_date", "status_questions"]:
-        #import pdb; pdb.set_trace()
+    # if subflow in ["status_delivery_date", "status_questions"]:
+    # import pdb; pdb.set_trace()
     z = get_subflow_sentences(manual, flow, subflow)
 
     # filter examples to only non-customer actions
-    x,y = list(zip(*[(x,y) for x,y in zip(x,y) if y is not None]))
+    xs, ys = list(zip(*[(x, y) for x, y in zip(xs, ys) if y is not None]))
 
-    return x, y, z
+    return {
+        "xs": xs,
+        "ys": ys,
+        "z": z,
+        "id": example["convo_id"],
+    }
 
 
 if __name__ == "__main__":
@@ -138,8 +145,8 @@ if __name__ == "__main__":
     eba_dir = Path("eba_data")
     eba_dir.mkdir(exist_ok=True)
 
-    for split in ["train","dev","test"]:
-        #examples = [convert_example(e) for e in track(raw_data[split])]
+    for split in ["train", "dev", "test"]:
+        # examples = [convert_example(e) for e in track(raw_data[split])]
         examples = [convert_example(e) for e in raw_data[split]]
         split_str = save_map[split]
         with (eba_dir / f"abcd_{split_str}.json").open("w") as f:

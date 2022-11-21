@@ -1,7 +1,7 @@
 tqdm
 rich
 transformers
-tensorboardX
+datasets
 pandas
 scikit-learn
 GPUtil

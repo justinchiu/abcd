@@ -49,7 +49,9 @@ def load_tokenizer(args):
     elif args.model_type == "albert":
         tokenizer = AlbertTokenizer.from_pretrained("albert-base-v2")
     else:
-        raise ValueError(f"Unrecognized model type {args.model_type} when loading tokenizer")
+        raise ValueError(
+            f"Unrecognized model type {args.model_type} when loading tokenizer"
+        )
 
     tokenizer.add_tokens(special)
     return tokenizer, ontology

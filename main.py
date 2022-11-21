@@ -31,7 +31,7 @@ def run_main(args, datasets, model, exp_logger):
         kb_labels["intent"] = list(model.mappings["intent"].keys())
         kb_labels["action"] = list(model.mappings["action"].keys())
 
-    #exp_logger.init_tb_writers()
+    # exp_logger.init_tb_writers()
     run_train(args, datasets, model, exp_logger, kb_labels)
 
     if args.do_eval:
@@ -66,10 +66,10 @@ def cds_loss(scores, targets, loss_func):
     action_loss = loss_func(action_scores, action_target)
     value_loss = loss_func(value_scores, value_target)
 
-    #utt_target_ids = utterance_target.unsqueeze(1)  # batch_size, 1
-    #chosen = torch.gather(utt_scores, dim=1, index=utt_target_ids)
+    # utt_target_ids = utterance_target.unsqueeze(1)  # batch_size, 1
+    # chosen = torch.gather(utt_scores, dim=1, index=utt_target_ids)
     chosen = utt_scores[torch.arange(batch_size), utterance_target]
-    #correct = chosen.mean()
+    # correct = chosen.mean()
     correct = chosen.sum()  # scalar
 
     res = utt_scores.logsumexp(1)
