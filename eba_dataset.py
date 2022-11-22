@@ -198,6 +198,9 @@ class AbcdDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.sent_labels)
 
+def truncate_left(seq, maxlen):
+    seqlen = len(seq)
+    return seq[seqlen-maxlen:] if seqlen > maxlen else seq
 
 # SIMPLIFIED: do not break up documents. subflow classification only
 def preprocess_subflow_abcd_docs(split, tok, answ_tok):
@@ -232,15 +235,6 @@ def preprocess_subflow_abcd_docs(split, tok, answ_tok):
 
 
 def preprocess_subflow_abcd(examples, tok, answ_tok, docs):
-    sents = []
-    supps = []
-    lengths = []
-    slengths = []
-    tokenized_sents = []
-    tokenized_supps = []
-    ds = []
-    num_s = []
-
     xs = [e["x"] for e in examples]
     tokenized_x = tok(xs, truncation=True, return_attention_mask=False)["input_ids"]
 
@@ -262,6 +256,7 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs):
     answ_tok_bos_idx = answ_tok.convert_tokens_to_ids(answ_tok.bos_token)
     answ_tok_eos_idx = answ_tok.convert_tokens_to_ids(answ_tok.eos_token)
 
+    maxlen = tok.max_len_single_sentence
     tokenized_sents = []
     tokenized_supps = []
     labels = []
@@ -276,14 +271,22 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs):
         z_idxs = [z_idx] + distractors
         labels.append(0) # index of true document
 
-        tokenized_sents.append([
+        sents = [
             x + [tok_unk_idx] + tok_docs[z] + [tok_eos_idx]
             for z in z_idxs
-        ])
-        tokenized_supps.append([
+        ]
+        supps = [
             x + [answ_tok_unk_idx] + answ_tok_docs[z] + [answ_tok_eos_idx]
             for z in z_idxs
-        ])
+        ]
+
+        sents = [truncate_left(s, maxlen) for s in sents]
+        supps = [truncate_left(s, maxlen) for s in supps]
+        if max(map(len, sents)) > maxlen:
+            import pdb; pdb.set_trace()
+
+        tokenized_sents.append(sents)
+        tokenized_supps.append(supps)
 
         # all docs
         #tokenized_sents.append([x + [tok_unk_idx] + z + [tok_eos_idx] for z in tok_docs])

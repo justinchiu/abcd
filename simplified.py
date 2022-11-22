@@ -83,15 +83,17 @@ def prepare_dataloader(tok, answer_tok, args):
 
 def run_lm(model, batch, bs, train=True):
     model, linear = model
-    m = nn.LogSoftmax(dim=-1)
-    outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'])
+    outputs = model(
+        input_ids=batch['input_ids'],
+        attention_mask=batch['attention_mask'],
+    )
     pooled_output = outputs[1]
     if train:
         dropout = nn.Dropout(model.config.hidden_dropout_prob)
         pooled_output = dropout(pooled_output)
     logits = linear(pooled_output).view(-1)
     if train:
-        return m(logits)
+        return logits.log_softmax(-1)
     else:
         return logits
 
@@ -121,8 +123,13 @@ def run_answer_model(model, input_ids, attn_mask, answs, tokenizer, beam, train)
     if train:
         outputs = model(input_ids=input_ids, attention_mask=attn_mask, labels=answs)
     else:
-        outputs = model.generate(input_ids, num_beams=beam, min_length=1, max_length=20)
-        scores = model(input_ids=input_ids, attention_mask=attn_mask, labels=outputs).loss
+        outputs = model.generate(
+            input_ids, num_beams=beam, min_length=1, max_length=20,
+            output_scores=True,
+            return_dict_in_generate=True,
+        )
+        import pdb; pdb.set_trace()
+        #scores = model(input_ids=input_ids, attention_mask=attn_mask, labels=outputs).loss
         outputs = (outputs, scores)
     return outputs
 
@@ -137,11 +144,10 @@ def run_model(batch, layers, answer_model, tokenizer, answer_tokenizer, max_p, r
     in_len = len(answer_in)
     answ_out = run_answer_model(answer_model, answer_in, answer_attn, labels, answer_tokenizer, beam=beam, train=train)
     if train:
-        loss = answ_out.loss.view(in_len, -1)
-        loss = (-loss).sum(dim=-1)
-        loss += pouts
-        loss = torch.logsumexp(loss, dim=-1)
-        loss = -loss.mean()
+        logits = answ_out.logits.log_softmax(-1)
+        N,T,V = logits.shape
+        loss = logits[torch.arange(N)[:,None], torch.arange(T), labels]
+        loss = -(loss.sum(-1) + pouts).logsumexp(-1).mean()
     else:
         loss = 0.
     return answ_out, pouts, loss
@@ -304,7 +310,7 @@ def main():
                 all_layers[0].train()
                 answer_model.train()
             _, _, loss = run_model(batch, all_layers, answer_model, tokenizer,
-                    answer_tokenizer, reg_coeff=args.reg_coeff, t=args.sentence_thrshold, max_p=args.max_p)
+                    answer_tokenizer, reg_coeff=args.reg_coeff, t=args.sentence_threshold, max_p=args.max_p)
             loss.backward()
             if step % args.gradient_accumulation_steps == 0 or step == len(train_dataloader) - 1:
                 optim.step()
