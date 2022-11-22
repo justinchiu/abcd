@@ -8,6 +8,7 @@ import wandb
 #from dataset import prepare_simplified, SimplifiedHotpotQADataset
 from eba_dataset import prepare_subflow_abcd, SubflowAbcdDataset
 from datasets import load_metric
+from rich.progress import track
 from transformers import AutoModel, AutoModelForSeq2SeqLM
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 from transformers import get_scheduler, set_seed
@@ -128,9 +129,11 @@ def run_answer_model(model, input_ids, attn_mask, answs, tokenizer, beam, train)
             output_scores=True,
             return_dict_in_generate=True,
         )
-        import pdb; pdb.set_trace()
-        #scores = model(input_ids=input_ids, attention_mask=attn_mask, labels=outputs).loss
-        outputs = (outputs, scores)
+        if beam > 1:
+            outputs = (outputs.sequences, outputs.sequences_scores)
+        else:
+            raise NotImplementedError
+            #scores = model(input_ids=input_ids, attention_mask=attn_mask, labels=outputs).loss
     return outputs
 
 def run_model(batch, layers, answer_model, tokenizer, answer_tokenizer, max_p, reg_coeff, t, beam=2, train=True):
@@ -138,17 +141,29 @@ def run_model(batch, layers, answer_model, tokenizer, answer_tokenizer, max_p, r
         if key == "input_ids" or key == "attention_mask":
             batch[key] = batch[key].to(device)
     bs = len(batch["answers"])
+    n_distractors = len(batch.contexts[0])
     pouts = run_lm(layers, batch, bs, train=train)
-    answer_in, answer_attn, labels = pad_answers(
-            answer_tokenizer, batch["contexts"], batch['answers'])
-    in_len = len(answer_in)
-    answ_out = run_answer_model(answer_model, answer_in, answer_attn, labels, answer_tokenizer, beam=beam, train=train)
     if train:
+        answer_in, answer_attn, labels = pad_answers(
+                answer_tokenizer, batch["contexts"], batch['answers'])
+        in_len = len(answer_in)
+        answ_out = run_answer_model(answer_model, answer_in, answer_attn, labels, answer_tokenizer, beam=beam, train=train)
+        assert bs == 1
         logits = answ_out.logits.log_softmax(-1)
+        # ASSUME N = total num documents during training
         N,T,V = logits.shape
         loss = logits[torch.arange(N)[:,None], torch.arange(T), labels]
         loss = -(loss.sum(-1) + pouts).logsumexp(-1).mean()
     else:
+        # pick out argmax contexts
+        # assuming pouts: bs * n_distractors
+        idxs = pouts.view(bs, n_distractors).argmax(-1).tolist()
+        contexts = [[c[i]] for i,c in zip(idxs, batch["contexts"])]
+        answer_in, answer_attn, labels = pad_answers(
+                answer_tokenizer, contexts, batch['answers'])
+        in_len = len(answer_in)
+        # only run answer prediction for argmax context
+        answ_out = run_answer_model(answer_model, answer_in, answer_attn, labels, answer_tokenizer, beam=beam, train=train)
         loss = 0.
     return answ_out, pouts, loss
 
@@ -163,32 +178,21 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
     if args.save_results and split == "Valid":
         para_results = []
         answ_results = []
-    for step, eval_batch in enumerate(dataloader):
+    for step, eval_batch in track(enumerate(dataloader), total=len(dataloader)):
+    #for step, eval_batch in enumerate(dataloader):
         bs = len(eval_batch["answers"])
+        n_distractors = len(eval_batch["contexts"][0])
+
+        # ANSWER EVAL Y|X
         gold = answ_tok.batch_decode(eval_batch['answers'], skip_special_tokens=True)
+        # ONLY DOING TOP-1
         eval_outs, para_preds, _ = run_model(
-                eval_batch, layers, answ_model, tok, answ_tok, max_p=True,
-                reg_coeff=args.reg_coeff, t=args.sentence_thrshold, train=False, beam=args.beam)
-        lens = eval_batch["lengths"]
-        lens.insert(0, 0)
-        for i in range(1, len(lens)):
-            lens[i] += lens[i-1]
+            eval_batch, layers, answ_model, tok, answ_tok, max_p=True,
+            reg_coeff=args.reg_coeff, t=args.sentence_threshold, train=False, beam=args.beam)
         eval_outs, scores = eval_outs
-        scores = scores.view(eval_outs.shape[0], -1)
-        para_preds = [para_preds[lens[i]:lens[i+1]] for i in range(len(lens)-1)]
-        for i in range(len(para_preds)):
-            para_preds[i] = m(para_preds[i])
-        eval_outs = [eval_outs[lens[i]:lens[i+1], :] for i in range(len(lens)-1)]
-        scores = [-scores[lens[i]:lens[i+1], :] for i in range(len(lens)-1)]
-        preds = []
-        for i in range(len(scores)):
-            mask = scores[i] !=0
-            scores[i] = (scores[i]*mask).sum(dim=-1)/mask.sum(dim=-1)
-            scores[i] = scores[i] + para_preds[i]
-            j = scores[i].argmax(dim=-1).item()
-            curr_out = eval_outs[i][j]
-            pred = tok.decode(curr_out, skip_special_tokens=True)
-            preds.append(pred)
+        # eval_outs: bs x max_toks=20
+        # scores: bs
+        preds = [tok.decode(out, skip_special_tokens=True) for out in eval_outs]
         gold = [normalize_answer(s) for s in gold]
         preds = [normalize_answer(s) for s in preds]
         if args.save_results and split == "Valid":
@@ -197,45 +201,30 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
             predictions=preds,
             references=gold,
         )
-        para_tmp = []
-        for s, d in zip(scores, eval_batch["ds"]):
-            pred = torch.topk(s, 2, dim=-1).indices.cpu().tolist()
-            curr = [0] * 10
-            curr_idx = 1
-            x, y = d[pred[0]], d[pred[curr_idx]]
-            while x == y:
-                pred = torch.topk(s, curr_idx+2, dim=-1).indices.cpu().tolist()
-                curr_idx += 1
-                x, y = d[pred[0]], d[pred[curr_idx]]
-            curr[x] = 1
-            curr[y] = 1
-            para_tmp.append(curr)
-        labels = [1] * 2 + [0] * 8
-        labels = [labels for _ in range(len(para_tmp))]
-        metric.add_batch(
-            predictions=para_tmp,
-            references=labels,
-        )
-        idxes = [pred.argmax(dim=-1).item() for pred in para_preds]
-        para_tmp = []
-        for pred, d in zip(para_preds, eval_batch["ds"]):
-            curr = [0] * 10
-            topk = torch.topk(pred, 2, dim=-1).indices.cpu().tolist()
-            curr_idx = 1
-            x, y = d[topk[0]], d[topk[curr_idx]]
-            while x == y:
-                topk = torch.topk(pred, curr_idx+2, dim=-1).indices.cpu().tolist()
-                curr_idx += 1
-                x, y = d[topk[0]], d[topk[curr_idx]]
-            curr[x] = 1
-            curr[y] = 1
-            para_tmp.append(curr)
+
+        # cant compute posterior with only argmax z
+        # POSTERIOR Z|X,Y
+        #para_tmp = [[s.argmax().item()] for s in scores]
+        # correct z is always 0
+        #labels = [[0]] * bs
+        #metric.add_batch(
+        #    predictions=para_tmp,
+        #    references=labels,
+        #)
+
+        # PRIOR Z|X
+        para_tmp = [[s.argmax().item()] for s in para_preds.view(bs, n_distractors)]
+        idxes = [s.argmax().item() for s in para_preds.view(bs, n_distractors)]
+        # correct z is always 0
+        labels = [[0]] * bs
         prior_metric.add_batch(
             predictions=para_tmp,
             references=labels,
         )
+
         if args.save_results and split == "Valid":
             para_results += idxes
+        """
         preds = []
         for i in range(len(idxes)):
             curr_out = eval_outs[i][idxes[i]]
@@ -246,17 +235,18 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
             predictions=preds,
             references=gold,
         )
-    pos_eval_metric = exact_match.compute()
-    pos_para_acc = metric.compute()
-    prior_eval_metric = prior_exact_match.compute()
-    prior_para_acc = prior_metric.compute()
+        """
+
+    y_exact_match = exact_match.compute()
+    #pos_para_acc = metric.compute()
+    #prior_eval_metric = prior_exact_match.compute()
+    z_acc = prior_metric.compute()
     if not args.nolog:
         wandb.log({
             "step": steps,
-            f"{split} Prior Para": prior_para_acc,
-            f"{split} Prior Acc": prior_eval_metric,
-            f"{split} Posterior Para": pos_para_acc,
-            f"{split} Posterior Acc": pos_eval_metric})
+            f"{split} Answer EM": y_exact_match,
+            f"{split} Subflow Acc": z_acc,
+        })
     if args.save_results and split == "Valid":
         torch.save((para_results, answ_results), f"logging/{args.run_name}|step-{steps}.pt")
     return pos_eval_metric['exact_match']
