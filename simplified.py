@@ -249,7 +249,8 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         })
     if args.save_results and split == "Valid":
         torch.save((para_results, answ_results), f"logging/{args.run_name}|step-{steps}.pt")
-    return pos_eval_metric['exact_match']
+    #return y_exact_match['exact_match']
+    return z_acc['accuracy']
 
 
 def main():
