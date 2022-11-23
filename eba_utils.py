@@ -85,7 +85,7 @@ def get_args():
     parser.add_argument(
         "--epoch",
         "-epoch",
-        default=10,
+        default=5,
         type=int,
         help="The number of epochs for fine-tuning.",
     )

@@ -7,3 +7,7 @@ scikit-learn
 GPUtil
 black
 wandb
+
+# experimental
+rank_bm25
+evaluate
