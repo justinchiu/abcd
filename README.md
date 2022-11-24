@@ -8,6 +8,7 @@ source scripts/jc_run.sh && baseline-oracle-intent-kb $lr $bsz
 source scripts/jc_run.sh && baseline-oracle-intent-kb 3e-5 12
 source scripts/jc_run.sh && baseline-oracle-intent-kb 1e-4 64
 ```
+To fix scenario.subflow: `python clean_data.py`. Produces `data/abcd_v1.2.json`.
 
 ## Introduction
 

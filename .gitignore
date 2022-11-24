@@ -5,6 +5,7 @@ results/
 wandb/
 
 data/abcd_v1.1.json
+data/abcd_v1.2.json
 data/utt_vectors.pt
 cache/
 

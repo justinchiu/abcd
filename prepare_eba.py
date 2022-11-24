@@ -149,7 +149,7 @@ if __name__ == "__main__":
     # 95,288 utterance candidates. where does mapping from turn -> candidates come from?
     with (data_dir / "utterances.json").open("r") as f:
         candidates = json.load(f)
-    with (data_dir / "abcd_v1.1.json").open("r") as f:
+    with (data_dir / "abcd_v1.2.json").open("r") as f:
         raw_data = json.load(f)
     with (data_dir / "guidelines.json").open("r") as f:
         manual = json.load(f)
