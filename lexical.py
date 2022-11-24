@@ -1,8 +1,11 @@
 import evaluate
 import json
 import numpy as np
+import random
 from pathlib import Path
 from rank_bm25 import BM25Okapi
+
+random.seed(1234)
 
 def load_json(path):
     with Path(path).open("r") as f:
@@ -30,19 +33,38 @@ get_index = {x:i for i,x in enumerate(fs)}
 tokenized_corpus = [doc.split(" ") for doc in docs]
 bm25 = BM25Okapi(tokenized_corpus)
 
+
 accuracy = evaluate.load("accuracy")
+contrastive_accuracy = evaluate.load("accuracy")
 for e in val_data:
     xs = e["xs"]
     flow = e["flow"]
     subflow = e["subflow"]
     idx = get_index[(flow, subflow)]
+
+    # sample without replacement without idx
+    r = set(range(len(fs)))
+    r.remove(idx)
+    distractors = random.sample(list(r), 3)
+
     predictions = []
+    contrastive_predictions = []
     for x in xs:
         tokenized_query = x.split()
         scores = bm25.get_scores(tokenized_query)
         predictions.append(scores.argmax())
+        idxs = distractors + [idx]
+        contrastive_predictions.append(scores[idxs].argmax())
     accuracy.add_batch(references=[idx]*len(xs), predictions=predictions)
+    contrastive_accuracy.add_batch(
+        references=[3]*len(xs),
+        predictions=contrastive_predictions,
+    )
 print(
     "Validation document selection accuracy:",
     accuracy.compute()["accuracy"],
+)
+print(
+    "Validation contrastive document selection accuracy:",
+    contrastive_accuracy.compute()["accuracy"],
 )

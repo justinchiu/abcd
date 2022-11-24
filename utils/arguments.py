@@ -109,7 +109,8 @@ def get_args():
     parser.add_argument(
         "--version",
         type=float,
-        default=1.1,
+        #default=1.1,
+        default=1.2,
         help="which version of the dataset is being used",
     )
     # v1.0 was used initially, but v1.1 is released as a significantly cleaner benchmark

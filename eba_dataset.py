@@ -267,7 +267,9 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs):
 
         z_idx = flow_subflow[(flow, subflow)]
         # sample distractors
-        distractors = random.sample(range(num_docs), 3)
+        s = range(num_docs)
+        s.remove(z_idx)
+        distractors = random.sample(list(s), 3)
         z_idxs = [z_idx] + distractors
         labels.append(0) # index of true document
 
