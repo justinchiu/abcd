@@ -50,6 +50,7 @@ def preprocess_subflow_abcd_docs(split, tok, answ_tok):
 def preprocess_subflow_abcd(examples, tok, answ_tok, docs, num_distractors=0):
     xs = [e["x"] for e in examples]
     tokenized_x = tok(xs, truncation=True, return_attention_mask=False)["input_ids"]
+    answ_tokenized_x = answ_tok(xs, truncation=True, return_attention_mask=False)["input_ids"]
 
     answers = [e["y"] for e in examples]
     tokenized_y = answ_tok(answers, truncation=True, return_attention_mask=False)[
@@ -70,11 +71,11 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs, num_distractors=0):
     answ_tok_eos_idx = answ_tok.convert_tokens_to_ids(answ_tok.eos_token)
 
     maxlen = tok.max_len_single_sentence
-    tokenized_sents = []
+    tokenized_sents = [truncate_left(x, maxlen) for x in tokenized_x]
     tokenized_supps = []
     labels = []
     #for x, e in track(zip(tokenized_x, examples)):
-    for x, e in zip(tokenized_x, examples):
+    for x, e in zip(answ_tokenized_x, examples):
         flow = e["flow"]
         subflow = e["subflow"]
 
@@ -97,12 +98,10 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs, num_distractors=0):
             for z in z_idxs
         ]
 
-        sents = [truncate_left(s, maxlen) for s in tokenized_x]
         supps = [truncate_left(s, maxlen) for s in supps]
         if max(map(len, sents)) > maxlen:
             import pdb; pdb.set_trace()
 
-        tokenized_sents.append(sents)
         tokenized_supps.append(supps)
 
     assert len(tokenized_sents) == len(tokenized_answers) == len(tokenized_supps)
