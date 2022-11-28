@@ -6,7 +6,8 @@ import math
 from tqdm import tqdm
 import wandb
 #from dataset import prepare_simplified, SimplifiedHotpotQADataset
-from eba_dataset import prepare_subflow_abcd, SubflowAbcdDataset
+#from eba_subflow_dataset import prepare_subflow_abcd, SubflowAbcdDataset
+from eba_subflow_factored_dataset import prepare_subflow_abcd, SubflowAbcdDataset
 from datasets import load_metric
 from rich.progress import track
 from transformers import AutoModel, AutoModelForSeq2SeqLM
@@ -73,8 +74,8 @@ def prepare_dataloader(tok, answer_tok, args):
     #tparas, tsupps, tansws, tds = prepare_simplified(tok, answer_tok, "validation", data, max_sent=args.max_paragraph_length, k=args.k_distractor, fixed=args.truncate_paragraph, sentence=args.sentence)
     #train_dataset = SimplifiedHotpotQADataset(paras, supps, answs, ds)
     #eval_dataset = SimplifiedHotpotQADataset(tparas, tsupps, tansws, tds)
-    paras, supps, answs, labels = prepare_subflow_abcd(tok, answer_tok, "train")
-    tparas, tsupps, tansws, tlabels = prepare_subflow_abcd(tok, answer_tok, "val")
+    paras, supps, answs, labels = prepare_subflow_abcd(tok, answer_tok, "train", num_distractors=args.num_distractors)
+    tparas, tsupps, tansws, tlabels = prepare_subflow_abcd(tok, answer_tok, "val", num_distractors=args.num_distractors)
     train_dataset = SubflowAbcdDataset(paras, supps, answs, labels)
     eval_dataset = SubflowAbcdDataset(tparas, tsupps, tansws, tlabels)
     data_collator = DataCollatorForMultipleChoice(tok, padding='longest', max_length=512)
@@ -261,7 +262,7 @@ def main():
     train_dataloader, eval_dataloader = prepare_dataloader(tokenizer, answer_tokenizer, args)
 
     model_name = args.model_dir.split('/')[-1]
-    run_name=f'model-{model_name} lr-{args.learning_rate} bs-{args.batch_size*args.gradient_accumulation_steps} k-{args.k_distractor} tp-{args.truncate_paragraph} beam-{args.beam} reg-{args.reg_coeff}'
+    run_name=f'model-{model_name} lr-{args.learning_rate} bs-{args.batch_size*args.gradient_accumulation_steps} k-{args.num_distractors} tp-{args.truncate_paragraph} beam-{args.beam} reg-{args.reg_coeff}'
     args.run_name = run_name
     all_layers = prepare_model(args)
     answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)
