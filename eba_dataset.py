@@ -237,6 +237,7 @@ def preprocess_subflow_abcd_docs(split, tok, answ_tok):
 def preprocess_subflow_abcd(examples, tok, answ_tok, docs):
     xs = [e["x"] for e in examples]
     tokenized_x = tok(xs, truncation=True, return_attention_mask=False)["input_ids"]
+    answ_tokenized_x = answ_tok(xs, truncation=True, return_attention_mask=False)["input_ids"]
 
     answers = [e["y"] for e in examples]
     tokenized_answers = answ_tok(answers, truncation=True, return_attention_mask=False)[
@@ -261,7 +262,7 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs):
     tokenized_supps = []
     labels = []
     #for x, e in track(zip(tokenized_x, examples)):
-    for x, e in zip(tokenized_x, examples):
+    for x, ax, e in zip(tokenized_x, answ_tokenized_x, examples):
         flow = e["flow"]
         subflow = e["subflow"]
 
@@ -278,7 +279,7 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs):
             for z in z_idxs
         ]
         supps = [
-            x + [answ_tok_unk_idx] + answ_tok_docs[z] + [answ_tok_eos_idx]
+            ax + [answ_tok_unk_idx] + answ_tok_docs[z] + [answ_tok_eos_idx]
             for z in z_idxs
         ]
 
