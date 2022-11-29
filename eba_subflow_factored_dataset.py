@@ -52,6 +52,7 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs, num_distractors=0):
     xs = [e["x"] for e in examples]
     tokenized_x = tok(xs, truncation=True, return_attention_mask=False)["input_ids"]
     tokenized_sents = [truncate_left(x, maxlen) for x in tokenized_x]
+    #tokenized_sents = [truncate_left(x, 64) for x in tokenized_x]
     answ_tokenized_x = answ_tok(xs, truncation=True, return_attention_mask=False)["input_ids"]
 
     doc_idxs = []
@@ -146,7 +147,7 @@ def prepare_subflow_abcd(tokenizer, answer_tokenizer, split, path="eba_data", nu
                 }
             )
 
-    fname = f"cache/abcd_new_tok_{split}_factored.pkl"
+    fname = f"cache/abcd_new_tok_{split}_factored_d{num_distractors}.pkl"
     if os.path.isfile(fname):
         with open(fname, "rb") as f:
             sents, doc_idxs, supps, answs, labels = pickle.load(f)

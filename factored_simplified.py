@@ -38,7 +38,7 @@ class DataCollatorForMultipleChoice:
         num_choices = len(features[0]["paras"])
         paras = [feature.pop("paras") for feature in features]
         lengths = [len(i) for i in paras]
-        paras = [p for ps in paras for p in ps]
+        #paras = [p for ps in paras for p in ps]
         paras = [{"input_ids": x} for x in paras]
 
         batch = self.tokenizer.pad(
@@ -56,11 +56,18 @@ class DataCollatorForMultipleChoice:
         labels_name = "labels"
         labels = [feature.pop(labels_name) for feature in features]
         docs_name = "docs"
-        doc_idxs = [feature.pop(docs_name) for feature in features]
+        docs = [feature.pop(docs_name) for feature in features][0]
         doc_idxs_name = "doc_idxs"
         doc_idxs = [feature.pop(doc_idxs_name) for feature in features]
 
-        import pdb; pdb.set_trace()
+        doc_lengths = [len(x) for x in docs]
+        batch_docs = self.tokenizer.pad(
+            [{"input_ids": x} for x in docs],
+            padding=self.padding,
+            max_length=self.max_length,
+            pad_to_multiple_of=self.pad_to_multiple_of,
+            return_tensors="pt",
+        )
 
         # Add back labels
         batch['contexts'] = contexts
@@ -68,8 +75,12 @@ class DataCollatorForMultipleChoice:
         batch['lengths'] = lengths
         batch['labels'] = labels
 
-        batch['docs'] = lengths
-        batch['doc_idxs'] = labels
+        batch['docs'] = docs
+        batch['doc_lengths'] = doc_lengths
+        batch['doc_idxs'] = torch.tensor(doc_idxs, dtype=torch.long)
+
+        batch["doc_input_ids"] = batch_docs.input_ids
+        batch["doc_attention_mask"] = batch_docs.attention_mask
 
         return batch
 
@@ -95,15 +106,39 @@ def prepare_dataloader(tok, answer_tok, args):
 
 def run_lm(model, batch, bs, train=True):
     model, linear = model
-    outputs = model(
-        input_ids=batch['input_ids'],
-        attention_mask=batch['attention_mask'],
+
+    #outputs = model(
+    #    input_ids=batch['input_ids'],
+    #    attention_mask=batch['attention_mask'],
+    #)
+
+    x = batch['input_ids']
+    x_attention_mask = batch['attention_mask']
+    z = batch.doc_input_ids[batch.doc_idxs]
+    z_attention_mask = batch.doc_attention_mask[batch.doc_idxs]
+
+    bsz, ndocs = batch.doc_idxs.shape
+    x_outputs = model(
+        input_ids=x,
+        attention_mask=x_attention_mask,
     )
-    pooled_output = outputs[1]
+    x_pooled_output = x_outputs[1]
+    z_outputs = model(
+        input_ids=z.view(bsz*ndocs,-1),
+        attention_mask=z_attention_mask.view(bsz*ndocs,-1),
+    )
+    z_pooled_output = z_outputs[1].view(bsz, ndocs, -1)
+    logits = torch.einsum(
+        "bh,bdh->bd",
+        x_pooled_output,
+        z_pooled_output.view(bsz, ndocs, -1),
+    )
+    """
     if train:
         dropout = nn.Dropout(model.config.hidden_dropout_prob)
         pooled_output = dropout(pooled_output)
-    logits = linear(pooled_output).view(-1)
+    logits = linear(pooled_output).view(bsz, ndocs)
+    """
     if train:
         return logits.log_softmax(-1)
     else:
@@ -149,7 +184,9 @@ def run_answer_model(model, input_ids, attn_mask, answs, tokenizer, beam, train)
 
 def run_model(batch, layers, answer_model, tokenizer, answer_tokenizer, max_p, reg_coeff, t, beam=2, train=True):
     for key in batch:
-        if key == "input_ids" or key == "attention_mask":
+        #if key == "input_ids" or key == "attention_mask":
+        if key in ["input_ids", "attention_mask", "doc_idxs", "doc_input_ids", "doc_attention_mask"]:
+            # doc_input_ids, doc_attention_mask should be cached
             batch[key] = batch[key].to(device)
     bs = len(batch["answers"])
     n_distractors = len(batch.contexts[0])
