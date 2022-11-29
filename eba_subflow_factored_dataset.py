@@ -48,9 +48,13 @@ def preprocess_subflow_abcd_docs(split, tok, answ_tok):
 
 
 def preprocess_subflow_abcd(examples, tok, answ_tok, docs, num_distractors=0):
+    maxlen = tok.max_len_single_sentence
     xs = [e["x"] for e in examples]
     tokenized_x = tok(xs, truncation=True, return_attention_mask=False)["input_ids"]
+    tokenized_sents = [truncate_left(x, maxlen) for x in tokenized_x]
     answ_tokenized_x = answ_tok(xs, truncation=True, return_attention_mask=False)["input_ids"]
+
+    doc_idxs = []
 
     answers = [e["y"] for e in examples]
     tokenized_y = answ_tok(answers, truncation=True, return_attention_mask=False)[
@@ -70,8 +74,6 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs, num_distractors=0):
     answ_tok_bos_idx = answ_tok.convert_tokens_to_ids(answ_tok.bos_token)
     answ_tok_eos_idx = answ_tok.convert_tokens_to_ids(answ_tok.eos_token)
 
-    maxlen = tok.max_len_single_sentence
-    tokenized_sents = [truncate_left(x, maxlen) for x in tokenized_x]
     tokenized_supps = []
     labels = []
     #for x, e in track(zip(tokenized_x, examples)):
@@ -93,20 +95,17 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs, num_distractors=0):
             # append label = index in manual
             labels.append(z_idx)
 
+        doc_idxs.append(z_idxs)
+
         supps = [
             x + [answ_tok_unk_idx] + answ_tok_docs[z] + [answ_tok_eos_idx]
             for z in z_idxs
         ]
-
         supps = [truncate_left(s, maxlen) for s in supps]
-        if max(map(len, sents)) > maxlen:
-            import pdb; pdb.set_trace()
-
         tokenized_supps.append(supps)
 
-    assert len(tokenized_sents) == len(tokenized_answers) == len(tokenized_supps)
-    import pdb; pdb.set_trace()
-    return tokenized_sents, tokenized_supps, tokenized_answers, labels
+    assert len(tokenized_sents) == len(tokenized_y) == len(tokenized_supps)
+    return tokenized_sents, doc_idxs, tokenized_supps, tokenized_y, labels
 
 
 def prepare_subflow_abcd(tokenizer, answer_tokenizer, split, path="eba_data", num_distractors=0):
@@ -150,20 +149,23 @@ def prepare_subflow_abcd(tokenizer, answer_tokenizer, split, path="eba_data", nu
     fname = f"cache/abcd_new_tok_{split}_factored.pkl"
     if os.path.isfile(fname):
         with open(fname, "rb") as f:
-            sents, supps, answs, labels = pickle.load(f)
+            sents, doc_idxs, supps, answs, labels = pickle.load(f)
     else:
-        sents, supps, answs, labels = preprocess_subflow_abcd(
+        sents, doc_idxs, supps, answs, labels = preprocess_subflow_abcd(
             out, tokenizer, answer_tokenizer, docs,
             num_distractors,
         )
         with open(fname, "wb") as f:
-            pickle.dump((sents, supps, answs, labels), f)
-    return (sents, supps, answs, labels)
+            pickle.dump((sents, doc_idxs, supps, answs, labels), f)
+    # docs[0] = tokenized documents (not answer-tokenized)
+    return (sents, docs[0], doc_idxs, supps, answs, labels)
 
 
 class SubflowAbcdDataset(torch.utils.data.Dataset):
-    def __init__(self, paras, supps, answs, labels):
+    def __init__(self, paras, docs, doc_idxs, supps, answs, labels):
         self.paras = paras
+        self.docs = docs
+        self.doc_idxs = doc_idxs
         self.supps = supps
         self.answs = answs
         self.labels = labels
@@ -171,6 +173,8 @@ class SubflowAbcdDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         item = dict()
         item["paras"] = self.paras[idx]
+        item["docs"] = self.docs
+        item["doc_idxs"] = self.doc_idxs[idx]
         item["supps"] = self.supps[idx]
         item["answs"] = self.answs[idx]
         item["labels"] = self.labels[idx]
