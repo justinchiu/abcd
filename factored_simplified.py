@@ -104,13 +104,8 @@ def prepare_dataloader(tok, answer_tok, args):
     eval_dataloader = DataLoader(eval_dataset, shuffle=False, collate_fn=data_collator, batch_size=args.eval_batch_size)
     return train_dataloader, eval_dataloader
 
-def run_lm(model, batch, bs, train=True):
+def run_lm(model, batch, bs, train=True, z_outputs=None):
     model, linear = model
-
-    #outputs = model(
-    #    input_ids=batch['input_ids'],
-    #    attention_mask=batch['attention_mask'],
-    #)
 
     x = batch['input_ids']
     x_attention_mask = batch['attention_mask']
@@ -123,10 +118,11 @@ def run_lm(model, batch, bs, train=True):
         attention_mask=x_attention_mask,
     )
     x_pooled_output = x_outputs[1]
-    z_outputs = model(
-        input_ids=z.view(bsz*ndocs,-1),
-        attention_mask=z_attention_mask.view(bsz*ndocs,-1),
-    )
+    if z_outputs is None:
+        z_outputs = model(
+            input_ids=z.view(bsz*ndocs,-1),
+            attention_mask=z_attention_mask.view(bsz*ndocs,-1),
+        )
     z_pooled_output = z_outputs[1].view(bsz, ndocs, -1)
     logits = torch.einsum(
         "bh,bdh->bd",
@@ -140,9 +136,9 @@ def run_lm(model, batch, bs, train=True):
     logits = linear(pooled_output).view(bsz, ndocs)
     """
     if train:
-        return logits.log_softmax(-1)
+        return logits.log_softmax(-1), None
     else:
-        return logits
+        return logits, z_outputs
 
 def pad_answers(tokenizer, contexts, raw_answers):
     lens = [len(c) for c in contexts]
@@ -182,7 +178,12 @@ def run_answer_model(model, input_ids, attn_mask, answs, tokenizer, beam, train)
             #scores = model(input_ids=input_ids, attention_mask=attn_mask, labels=outputs).loss
     return outputs
 
-def run_model(batch, layers, answer_model, tokenizer, answer_tokenizer, max_p, reg_coeff, t, beam=2, train=True):
+def run_model(
+    batch, layers, answer_model, tokenizer, answer_tokenizer, max_p, reg_coeff, t,
+    beam=2,
+    train=True,
+    z_outputs=None,
+):
     for key in batch:
         #if key == "input_ids" or key == "attention_mask":
         if key in ["input_ids", "attention_mask", "doc_idxs", "doc_input_ids", "doc_attention_mask"]:
@@ -190,7 +191,7 @@ def run_model(batch, layers, answer_model, tokenizer, answer_tokenizer, max_p, r
             batch[key] = batch[key].to(device)
     bs = len(batch["answers"])
     n_distractors = len(batch.contexts[0])
-    pouts = run_lm(layers, batch, bs, train=train)
+    pouts, z_outputs = run_lm(layers, batch, bs, train=train, z_outputs=z_outputs)
     if train:
         answer_in, answer_attn, labels = pad_answers(
                 answer_tokenizer, batch["contexts"], batch['answers'])
@@ -213,7 +214,7 @@ def run_model(batch, layers, answer_model, tokenizer, answer_tokenizer, max_p, r
         # only run answer prediction for argmax context
         answ_out = run_answer_model(answer_model, answer_in, answer_attn, labels, answer_tokenizer, beam=beam, train=train)
         loss = 0.
-    return answ_out, pouts, loss
+    return answ_out, pouts, loss, z_outputs
 
 def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
     m = nn.LogSoftmax(dim=-1)
@@ -226,6 +227,8 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
     if args.save_results and split == "Valid":
         para_results = []
         answ_results = []
+
+    z_outputs = None
     for step, eval_batch in track(enumerate(dataloader), total=len(dataloader)):
     #for step, eval_batch in enumerate(dataloader):
         bs = len(eval_batch["answers"])
@@ -234,9 +237,15 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         # ANSWER EVAL Y|X
         gold = answ_tok.batch_decode(eval_batch['answers'], skip_special_tokens=True)
         # ONLY DOING TOP-1
-        eval_outs, para_preds, _ = run_model(
+        eval_outs, para_preds, _, z_outputs = run_model(
             eval_batch, layers, answ_model, tok, answ_tok, max_p=True,
-            reg_coeff=args.reg_coeff, t=args.sentence_threshold, train=False, beam=args.beam)
+            reg_coeff=args.reg_coeff, t=args.sentence_threshold,
+            train=False,
+            beam=args.beam,
+            z_outputs=z_outputs,
+        )
+        if args.num_distractors > 0:
+            z_outputs = None
         eval_outs, scores = eval_outs
         # eval_outs: bs x max_toks=20
         # scores: bs
@@ -348,7 +357,7 @@ def main():
                         all_layers[0].save_pretrained(f"{args.output_model_dir}/{run_name}")
                 all_layers[0].train()
                 answer_model.train()
-            _, _, loss = run_model(batch, all_layers, answer_model, tokenizer,
+            _, _, loss, _ = run_model(batch, all_layers, answer_model, tokenizer,
                     answer_tokenizer, reg_coeff=args.reg_coeff, t=args.sentence_threshold, max_p=args.max_p)
             loss.backward()
             if step % args.gradient_accumulation_steps == 0 or step == len(train_dataloader) - 1:
