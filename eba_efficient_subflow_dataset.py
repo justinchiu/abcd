@@ -1,0 +1,282 @@
+from collections import defaultdict, Counter
+from glob import glob
+from itertools import combinations, product
+import json
+from pathlib import Path
+import pickle
+import random
+from rich.progress import track
+import os
+import numpy as np
+import torch
+
+
+def truncate_left(seq, maxlen):
+    seqlen = len(seq)
+    return seq[seqlen - maxlen :] if seqlen > maxlen else seq
+
+
+# SIMPLIFIED: do not break up documents. subflow classification only
+def preprocess_subflow_abcd_docs(split, tok, answ_tok, sep_token="</s>"):
+    assert tok.unk_token == answ_tok.unk_token
+
+    fp = Path("eba_data") / f"abcd_{split}_manual.json"
+    with fp.open("r") as f:
+        docs = json.load(f)
+
+        flow_subflow_to_idx = {}
+        subflows = []
+        for flow, subflow_doc in docs.items():
+            for subflow, sentences in subflow_doc.items():
+                flow_subflow_to_idx[(flow, subflow)] = len(subflows)
+                subflow = f" {sep_token} ".join(sentences)
+                subflows.append(subflow)
+
+        # different tokenizers for document choice and answer choice
+        tokenized_subflows = tok(
+            subflows,
+            truncation=True,
+            return_attention_mask=False,
+            add_special_tokens=False,
+        )["input_ids"]
+        answer_tokenized_subflows = answ_tok(
+            subflows,
+            truncation=True,
+            return_attention_mask=False,
+            add_special_tokens=False,
+        )["input_ids"]
+
+        return tokenized_subflows, answer_tokenized_subflows, flow_subflow_to_idx
+
+
+def preprocess_subflow_abcd(examples, tok, answ_tok, flow_subflow, sep=" "):
+    maxlen = tok.max_len_single_sentence
+    xs = [e["x"] for e in examples]
+    tokenized_x = tok(xs, truncation=True, return_attention_mask=False)["input_ids"]
+    tokenized_x = [truncate_left(x, maxlen) for x in tokenized_x]
+    # tokenized_x = [truncate_left(x, 64) for x in tokenized_x]
+    answer_tokenized_x = answ_tok(xs, truncation=True, return_attention_mask=False)[
+        "input_ids"
+    ]
+    answer_tokenized_x = [truncate_left(x, maxlen) for x in answer_tokenized_x]
+
+    answers = [e["y"] for e in examples]
+    tokenized_y = answ_tok(answers, truncation=True, return_attention_mask=False)[
+        "input_ids"
+    ]
+
+    num_docs = len(flow_subflow)
+
+    doc_labels = [flow_subflow[(e["flow"], e["subflow"])] for e in examples]
+
+    assert len(tokenized_x) == len(answer_tokenized_x) == len(tokenized_y)
+    return tokenized_x, answer_tokenized_x, doc_labels, tokenized_y
+
+def preprocess_sents_abcd(data, tokenizer):
+    x_to_sent_idxs = []
+    sents = []
+    tokenized_sents = []
+    for conversation in data:
+        xs = conversation["xs"]
+        ys = conversation["ys"]
+        id = conversation["id"]
+
+        start_idx = len(sents)
+
+        raw_ys = np.array(conversation["raw_ys"])
+        this_sents = conversation["sents"]
+
+        sents.extend(this_sents)
+
+        this_tokenized_sents = tokenizer(
+            this_sents,
+            truncation=True,
+            return_attention_mask=False,
+            add_special_tokens=False,
+        )["input_ids"]
+        tokenized_sents.extend(this_tokenized_sents)
+
+        idxs = np.arange(len(this_sents)) + start_idx
+
+        is_turns = raw_ys != None
+        x_idx = 0
+        for i, is_turn in enumerate(is_turns):
+            if is_turn:
+                x_to_sent_idxs.append(idxs[:i+1].tolist())
+                string = " </s> ".join([sents[i] for i in idxs[:i+1]])
+                #print(string == xs[x_idx])
+                #print(string)
+                #print(xs[x_idx])
+                assert string == xs[x_idx]
+                x_idx += 1
+
+    return x_to_sent_idxs, this_tokenized_sents 
+
+
+def encode_abcd(sents, xs, docs, tokenizer, encoder):
+    device = encoder.device
+    bsz = 32
+
+    sentence_vectors = []
+    contextual_sentence_vectors = []
+    doc_sentence_vectors = []
+
+    for idx in track(range(0, len(sents), bsz), description="Encode sents"):
+        input = tokenizer.pad(
+            [{"input_ids": x} for x in xs[idx:idx+bsz]],
+            return_tensors="pt",
+        ).to(device)
+        output = encoder(**input)
+        sentence_vectors.extend(output.pooler_output.cpu().numpy())
+
+    for idx in track(range(0, len(xs), bsz), description="Encode x"):
+        input = tokenizer.pad(
+            [{"input_ids": x} for x in xs[idx:idx+bsz]],
+            return_tensors="pt",
+        ).to(device)
+        output = encoder(**input)
+
+        # sepmask should be true at <s> or </s>
+        sepmask = input.input_ids == 2
+        sepmask[:,0] = True # first element is <s>
+        # there will be an "extra" vector at the end of the sequence
+        # might as well use it
+        for i in range(bsz):
+            hs = output.last_hidden_state[i][sepmask[i]].cpu().numpy()
+            contextual_sentence_vectors.append(hs)
+
+    doc_to_vectors = []
+    for idx in track(range(0, len(docs), bsz), description="Encode docs"):
+        input = tokenizer.pad(
+            [{"input_ids": x} for x in docs[idx:idx+bsz]],
+            return_tensors="pt",
+        ).to(device)
+        output = encoder(**input)
+
+        # sepmask should be true at <s> or </s>
+        sepmask = input.input_ids == 2
+        sepmask[:,0] = True # first element is <s>
+        # there will be an "extra" vector at the end of the sequence
+        # might as well use it
+        for i in range(bsz):
+            hs = output.last_hidden_state[i][sepmask[i]].cpu().numpy()
+            doc_sentence_vectors.append(hs)
+
+    return sentence_vectors, contextual_sentence_vectors, doc_sentence_vectors
+
+
+def prepare_subflow_abcd(
+    tokenizer, answer_tokenizer, split, path="eba_data",
+    encoder=None,
+):
+    print(f"prepare abcd {split}")
+
+    # save/load/cache docs
+    fname = f"cache/abcd_efficient_subflow_manual_tok_{split}.pkl"
+    if os.path.isfile(fname):
+        with open(fname, "rb") as f:
+            docs, answer_docs, flow_subflow = pickle.load(f)
+    else:
+        docs_tuple = preprocess_subflow_abcd_docs(split, tokenizer, answer_tokenizer)
+        with open(fname, "wb") as f:
+            pickle.dump(docs_tuple, f)
+        docs, answer_docs, flow_subflow = docs_tuple
+
+    with open(f"{path}/abcd_{split}.json", "r") as fin:
+        data = json.load(fin)
+    examples = []
+    for conversation in data:
+        xs = conversation["xs"]
+        ys = conversation["ys"]
+        id = conversation["id"]
+
+        # get docs
+        flow = conversation["flow"]
+        subflow = conversation["subflow"]
+
+        for turn, (x, y) in enumerate(zip(xs, ys)):
+            examples.append(
+                {
+                    "x": x,
+                    "y": y,
+                    "flow": flow,
+                    "subflow": subflow,
+                    "id": id,
+                    "turn": turn,
+                }
+            )
+
+    fname = f"cache/abcd_efficient_tok_{split}.pkl"
+    if os.path.isfile(fname):
+        with open(fname, "rb") as f:
+            x, answer_x, doc_labels, y = pickle.load(f)
+    else:
+        x, answer_x, doc_labels, y = preprocess_subflow_abcd(
+            examples,
+            tokenizer,
+            answer_tokenizer,
+            flow_subflow,
+        )
+        with open(fname, "wb") as f:
+            pickle.dump((x, answer_x, doc_labels, y), f)
+    # docs[0] = tokenized documents (not answer-tokenized)
+
+    # map x to sent idxs for efficient encoding
+    fname = f"cache/abcd_efficient_x_sents_{split}.pkl"
+    if os.path.isfile(fname):
+        with open(fname, "rb") as f:
+            x_to_sent_idxs, sents = pickle.load(f)
+    else:
+        x_to_sent_idxs, sents = preprocess_sents_abcd(
+            data,
+            tokenizer,
+        )
+        with open(fname, "wb") as f:
+            pickle.dump((x_to_sent_idxs, sents), f)
+
+
+    fname = f"cache/abcd_efficient_emb_{split}.pkl"
+    if os.path.isfile(fname):
+        with open(fname, "rb") as f:
+            enc_sents, enc_x, enc_docs = pickle.load(f)
+    else:
+        with torch.no_grad():
+            enc_sents, enc_x, enc_docs = encode_abcd(sents, x, docs, tokenizer, encoder)
+            with open(fname, "wb") as f:
+                pickle.dump((enc_sents, enc_x, enc_docs), f)
+
+    return (
+        x, answer_x, docs, answer_docs, doc_labels, y,
+        x_to_sent_idxs, enc_sents, enc_x, enc_docs,
+    )
+
+
+class SubflowAbcdDataset(torch.utils.data.Dataset):
+    def __init__(
+        self,
+        x,
+        answer_x,
+        docs,
+        answer_docs,
+        answers,
+        doc_labels,
+    ):
+        self.x = x
+        self.answer_x = answer_x
+        self.docs = docs
+        self.answer_docs = answer_docs
+        self.doc_labels = doc_labels
+        self.answers = answers
+
+    def __getitem__(self, idx):
+        item = dict()
+        item["x"] = self.x[idx]
+        item["answer_x"] = self.answer_x[idx]
+        item["docs"] = self.docs
+        item["answer_docs"] = self.answer_docs
+        item["doc_label"] = self.doc_labels[idx]
+        item["answer"] = self.answers[idx]
+        return item
+
+    def __len__(self):
+        return len(self.doc_labels)

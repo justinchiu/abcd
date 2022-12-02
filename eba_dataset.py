@@ -13,8 +13,9 @@ import torch
 def len_helper(l):
     l.insert(0, 0)
     for i in range(1, len(l)):
-        l[i] += l[i-1]
+        l[i] += l[i - 1]
     return l
+
 
 def preprocess_abcd_docs(split, tok, answ_tok):
     assert tok.unk_token == answ_tok.unk_token
@@ -60,36 +61,46 @@ def preprocess_abcd_docs(split, tok, answ_tok):
             sents,
             truncation=True,
             return_attention_mask=False,
-            add_special_tokens = False,
-        )['input_ids']
-        tokenized_sents = [tokenized_sents[lengths[i]:lengths[i+1]] for i in range(len(lengths)-1)]
+            add_special_tokens=False,
+        )["input_ids"]
+        tokenized_sents = [
+            tokenized_sents[lengths[i] : lengths[i + 1]]
+            for i in range(len(lengths) - 1)
+        ]
         tokenized_supps = answ_tok(
             supps,
             truncation=True,
             return_attention_mask=False,
-            add_special_tokens = False,
-        )['input_ids']
-        tokenized_supps = [tokenized_supps[slengths[i]:slengths[i+1]] for i in range(len(slengths)-1)]
+            add_special_tokens=False,
+        )["input_ids"]
+        tokenized_supps = [
+            tokenized_supps[slengths[i] : slengths[i + 1]]
+            for i in range(len(slengths) - 1)
+        ]
 
         assert len(tokenized_sents) == len(tokenized_supps) == len(flow_subflow)
 
         tok_sents = defaultdict(dict)
         tok_supps = defaultdict(dict)
-        for (flow, subflow), toksents, toksupps in zip(flow_subflow, tokenized_sents, tokenized_supps):
+        for (flow, subflow), toksents, toksupps in zip(
+            flow_subflow, tokenized_sents, tokenized_supps
+        ):
             tok_sents[flow][subflow] = toksents
             tok_supps[flow][subflow] = toksupps
 
         # for debugging: but roberta tokenizer doesnt seem to satisfy round-trip due to spaces around apostrophe
         if False:
             tokenized_sents_flat = [x for xs in tokenized_sents for x in xs]
-            out = tok.batch_decode(tokenized_sents_flat, cleanup_tokenization_spaces=False)
+            out = tok.batch_decode(
+                tokenized_sents_flat, cleanup_tokenization_spaces=False
+            )
             out_toks = [tok.convert_ids_to_tokens(xs) for xs in tokenized_sents_flat]
-            for x,y,z in zip(out, sents, out_toks):
+            for x, y, z in zip(out, sents, out_toks):
                 if x != y:
                     print(x)
                     print(y)
                     print(z)
-            assert all(x == y for x,y in zip(out, sents))
+            assert all(x == y for x, y in zip(out, sents))
 
         return tok_sents, tok_supps
 
@@ -115,7 +126,9 @@ def preprocess_abcd(examples, tok, answ_tok, fixed, max_e, docs):
     # tokenized_sents: List[List[x <unk> d]]
     # tokenized_supps: List[List[x <unk> d]]
     raise NotImplementedError
-    import pdb; pdb.set_trace()
+    import pdb
+
+    pdb.set_trace()
 
     assert len(tokenized_supps) == len(tokenized_answers) == len(tokenized_sents)
     return tokenized_sents, tokenized_supps, tokenized_answers, ds, num_s
@@ -165,7 +178,12 @@ def prepare_abcd(tokenizer, answer_tokenizer, split, fixed, max_e, path="eba_dat
             sents, supps, answs, ds, num_s = pickle.load(f)
     else:
         sents, supps, answs, ds, num_s = preprocess_abcd(
-            out, tokenizer, answer_tokenizer, fixed, max_e, docs,
+            out,
+            tokenizer,
+            answer_tokenizer,
+            fixed,
+            max_e,
+            docs,
         )
         with open(fname, "wb") as f:
             pickle.dump((sents, supps, answs, ds, num_s), f)
@@ -198,9 +216,11 @@ class AbcdDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.sent_labels)
 
+
 def truncate_left(seq, maxlen):
     seqlen = len(seq)
-    return seq[seqlen-maxlen:] if seqlen > maxlen else seq
+    return seq[seqlen - maxlen :] if seqlen > maxlen else seq
+
 
 # SIMPLIFIED: do not break up documents. subflow classification only
 def preprocess_subflow_abcd_docs(split, tok, answ_tok):
@@ -222,14 +242,14 @@ def preprocess_subflow_abcd_docs(split, tok, answ_tok):
             paragraphs,
             truncation=True,
             return_attention_mask=False,
-            add_special_tokens = False,
-        )['input_ids']
+            add_special_tokens=False,
+        )["input_ids"]
         tokenized_supps = answ_tok(
             paragraphs,
             truncation=True,
             return_attention_mask=False,
-            add_special_tokens = False,
-        )['input_ids']
+            add_special_tokens=False,
+        )["input_ids"]
 
         return tokenized_sents, tokenized_supps, flow_subflow_to_idx
 
@@ -237,7 +257,9 @@ def preprocess_subflow_abcd_docs(split, tok, answ_tok):
 def preprocess_subflow_abcd(examples, tok, answ_tok, docs):
     xs = [e["x"] for e in examples]
     tokenized_x = tok(xs, truncation=True, return_attention_mask=False)["input_ids"]
-    answ_tokenized_x = answ_tok(xs, truncation=True, return_attention_mask=False)["input_ids"]
+    answ_tokenized_x = answ_tok(xs, truncation=True, return_attention_mask=False)[
+        "input_ids"
+    ]
 
     answers = [e["y"] for e in examples]
     tokenized_answers = answ_tok(answers, truncation=True, return_attention_mask=False)[
@@ -261,7 +283,7 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs):
     tokenized_sents = []
     tokenized_supps = []
     labels = []
-    #for x, e in track(zip(tokenized_x, examples)):
+    # for x, e in track(zip(tokenized_x, examples)):
     for x, ax, e in zip(tokenized_x, answ_tokenized_x, examples):
         flow = e["flow"]
         subflow = e["subflow"]
@@ -272,12 +294,9 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs):
         s.remove(z_idx)
         distractors = random.sample(list(s), 3)
         z_idxs = [z_idx] + distractors
-        labels.append(0) # index of true document
+        labels.append(0)  # index of true document
 
-        sents = [
-            x + [tok_unk_idx] + tok_docs[z] + [tok_eos_idx]
-            for z in z_idxs
-        ]
+        sents = [x + [tok_unk_idx] + tok_docs[z] + [tok_eos_idx] for z in z_idxs]
         supps = [
             ax + [answ_tok_unk_idx] + answ_tok_docs[z] + [answ_tok_eos_idx]
             for z in z_idxs
@@ -286,14 +305,16 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs):
         sents = [truncate_left(s, maxlen) for s in sents]
         supps = [truncate_left(s, maxlen) for s in supps]
         if max(map(len, sents)) > maxlen:
-            import pdb; pdb.set_trace()
+            import pdb
+
+            pdb.set_trace()
 
         tokenized_sents.append(sents)
         tokenized_supps.append(supps)
 
         # all docs
-        #tokenized_sents.append([x + [tok_unk_idx] + z + [tok_eos_idx] for z in tok_docs])
-        #tokenized_supps.append([x + [answ_tok_unk_idx] + z + [answ_tok_eos_idx] for z in answ_tok_docs])
+        # tokenized_sents.append([x + [tok_unk_idx] + z + [tok_eos_idx] for z in tok_docs])
+        # tokenized_supps.append([x + [answ_tok_unk_idx] + z + [answ_tok_eos_idx] for z in answ_tok_docs])
 
     assert len(tokenized_sents) == len(tokenized_answers) == len(tokenized_supps)
     return tokenized_sents, tokenized_supps, tokenized_answers, labels
@@ -343,7 +364,10 @@ def prepare_subflow_abcd(tokenizer, answer_tokenizer, split, path="eba_data"):
             sents, supps, answs, labels = pickle.load(f)
     else:
         sents, supps, answs, labels = preprocess_subflow_abcd(
-            out, tokenizer, answer_tokenizer, docs,
+            out,
+            tokenizer,
+            answer_tokenizer,
+            docs,
         )
         with open(fname, "wb") as f:
             pickle.dump((sents, supps, answs, labels), f)

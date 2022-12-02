@@ -12,7 +12,8 @@ import torch
 
 def truncate_left(seq, maxlen):
     seqlen = len(seq)
-    return seq[seqlen-maxlen:] if seqlen > maxlen else seq
+    return seq[seqlen - maxlen :] if seqlen > maxlen else seq
+
 
 # SIMPLIFIED: do not break up documents. subflow classification only
 def preprocess_subflow_abcd_docs(split, tok, answ_tok):
@@ -35,14 +36,14 @@ def preprocess_subflow_abcd_docs(split, tok, answ_tok):
             paragraphs,
             truncation=True,
             return_attention_mask=False,
-            add_special_tokens = False,
-        )['input_ids']
+            add_special_tokens=False,
+        )["input_ids"]
         tokenized_supps = answ_tok(
             paragraphs,
             truncation=True,
             return_attention_mask=False,
-            add_special_tokens = False,
-        )['input_ids']
+            add_special_tokens=False,
+        )["input_ids"]
 
         return tokenized_sents, tokenized_supps, flow_subflow_to_idx
 
@@ -73,7 +74,7 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs):
     tokenized_sents = []
     tokenized_supps = []
     labels = []
-    #for x, e in track(zip(tokenized_x, examples)):
+    # for x, e in track(zip(tokenized_x, examples)):
     for x, e in zip(tokenized_x, examples):
         flow = e["flow"]
         subflow = e["subflow"]
@@ -84,12 +85,9 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs):
         s.remove(z_idx)
         distractors = random.sample(list(s), 3)
         z_idxs = [z_idx] + distractors
-        labels.append(0) # index of true document
+        labels.append(0)  # index of true document
 
-        sents = [
-            x + [tok_unk_idx] + tok_docs[z] + [tok_eos_idx]
-            for z in z_idxs
-        ]
+        sents = [x + [tok_unk_idx] + tok_docs[z] + [tok_eos_idx] for z in z_idxs]
         supps = [
             x + [answ_tok_unk_idx] + answ_tok_docs[z] + [answ_tok_eos_idx]
             for z in z_idxs
@@ -98,14 +96,16 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs):
         sents = [truncate_left(s, maxlen) for s in sents]
         supps = [truncate_left(s, maxlen) for s in supps]
         if max(map(len, sents)) > maxlen:
-            import pdb; pdb.set_trace()
+            import pdb
+
+            pdb.set_trace()
 
         tokenized_sents.append(sents)
         tokenized_supps.append(supps)
 
         # all docs
-        #tokenized_sents.append([x + [tok_unk_idx] + z + [tok_eos_idx] for z in tok_docs])
-        #tokenized_supps.append([x + [answ_tok_unk_idx] + z + [answ_tok_eos_idx] for z in answ_tok_docs])
+        # tokenized_sents.append([x + [tok_unk_idx] + z + [tok_eos_idx] for z in tok_docs])
+        # tokenized_supps.append([x + [answ_tok_unk_idx] + z + [answ_tok_eos_idx] for z in answ_tok_docs])
 
     assert len(tokenized_sents) == len(tokenized_answers) == len(tokenized_supps)
     return tokenized_sents, tokenized_supps, tokenized_answers, labels
@@ -155,7 +155,10 @@ def prepare_subflow_abcd(tokenizer, answer_tokenizer, split, path="eba_data"):
             sents, supps, answs, labels = pickle.load(f)
     else:
         sents, supps, answs, labels = preprocess_subflow_abcd(
-            out, tokenizer, answer_tokenizer, docs,
+            out,
+            tokenizer,
+            answer_tokenizer,
+            docs,
         )
         with open(fname, "wb") as f:
             pickle.dump((sents, supps, answs, labels), f)

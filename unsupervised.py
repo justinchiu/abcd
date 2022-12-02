@@ -326,7 +326,9 @@ def evaluate(steps, args, model, linear, answ_model, tok, answ_tok, dataloader, 
 def main():
     args = get_args()
     tokenizer = AutoTokenizer.from_pretrained(args.model_dir, use_fast=True)
-    answer_tokenizer = AutoTokenizer.from_pretrained(args.answer_model_dir, use_fast=True)
+    answer_tokenizer = AutoTokenizer.from_pretrained(
+        args.answer_model_dir, use_fast=True
+    )
     train_dataloader, eval_dataloader, test_dataloader = prepare_dataloader(
         tokenizer, answer_tokenizer, args
     )

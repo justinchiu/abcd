@@ -7,9 +7,11 @@ from rank_bm25 import BM25Okapi
 
 random.seed(1234)
 
+
 def load_json(path):
     with Path(path).open("r") as f:
         return json.load(f)
+
 
 train_data = load_json("eba_data/abcd_train.json")
 train_manual = load_json("eba_data/abcd_train_manual.json")
@@ -27,7 +29,7 @@ fs = [
     for flow, subflow_man in val_manual.items()
     for subflow, sents in subflow_man.items()
 ]
-get_index = {x:i for i,x in enumerate(fs)}
+get_index = {x: i for i, x in enumerate(fs)}
 
 # build index
 tokenized_corpus = [doc.split(" ") for doc in docs]
@@ -55,9 +57,9 @@ for e in val_data:
         predictions.append(scores.argmax())
         idxs = distractors + [idx]
         contrastive_predictions.append(scores[idxs].argmax())
-    accuracy.add_batch(references=[idx]*len(xs), predictions=predictions)
+    accuracy.add_batch(references=[idx] * len(xs), predictions=predictions)
     contrastive_accuracy.add_batch(
-        references=[3]*len(xs),
+        references=[3] * len(xs),
         predictions=contrastive_predictions,
     )
 print(

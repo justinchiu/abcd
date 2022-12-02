@@ -12,7 +12,8 @@ import torch
 
 def truncate_left(seq, maxlen):
     seqlen = len(seq)
-    return seq[seqlen-maxlen:] if seqlen > maxlen else seq
+    return seq[seqlen - maxlen :] if seqlen > maxlen else seq
+
 
 # SIMPLIFIED: do not break up documents. subflow classification only
 def preprocess_subflow_abcd_docs(split, tok, answ_tok):
@@ -35,14 +36,14 @@ def preprocess_subflow_abcd_docs(split, tok, answ_tok):
             paragraphs,
             truncation=True,
             return_attention_mask=False,
-            add_special_tokens = False,
-        )['input_ids']
+            add_special_tokens=False,
+        )["input_ids"]
         tokenized_supps = answ_tok(
             paragraphs,
             truncation=True,
             return_attention_mask=False,
-            add_special_tokens = False,
-        )['input_ids']
+            add_special_tokens=False,
+        )["input_ids"]
 
         return tokenized_sents, tokenized_supps, flow_subflow_to_idx
 
@@ -52,8 +53,10 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs, num_distractors=0):
     xs = [e["x"] for e in examples]
     tokenized_x = tok(xs, truncation=True, return_attention_mask=False)["input_ids"]
     tokenized_sents = [truncate_left(x, maxlen) for x in tokenized_x]
-    #tokenized_sents = [truncate_left(x, 64) for x in tokenized_x]
-    answ_tokenized_x = answ_tok(xs, truncation=True, return_attention_mask=False)["input_ids"]
+    # tokenized_sents = [truncate_left(x, 64) for x in tokenized_x]
+    answ_tokenized_x = answ_tok(xs, truncation=True, return_attention_mask=False)[
+        "input_ids"
+    ]
 
     doc_idxs = []
 
@@ -77,7 +80,7 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs, num_distractors=0):
 
     tokenized_supps = []
     labels = []
-    #for x, e in track(zip(tokenized_x, examples)):
+    # for x, e in track(zip(tokenized_x, examples)):
     for x, e in zip(answ_tokenized_x, examples):
         flow = e["flow"]
         subflow = e["subflow"]
@@ -90,7 +93,7 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs, num_distractors=0):
             s.remove(z_idx)
             distractors = random.sample(list(s), num_distractors)
             z_idxs = [z_idx] + distractors
-            labels.append(0) # index of true document is always the first one
+            labels.append(0)  # index of true document is always the first one
         else:
             # distractors = all subflows
             # append label = index in manual
@@ -109,7 +112,9 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, docs, num_distractors=0):
     return tokenized_sents, doc_idxs, tokenized_supps, tokenized_y, labels
 
 
-def prepare_subflow_abcd(tokenizer, answer_tokenizer, split, path="eba_data", num_distractors=0):
+def prepare_subflow_abcd(
+    tokenizer, answer_tokenizer, split, path="eba_data", num_distractors=0
+):
     print(f"prepare abcd {split}")
 
     # save/load/cache docs
@@ -153,7 +158,10 @@ def prepare_subflow_abcd(tokenizer, answer_tokenizer, split, path="eba_data", nu
             sents, doc_idxs, supps, answs, labels = pickle.load(f)
     else:
         sents, doc_idxs, supps, answs, labels = preprocess_subflow_abcd(
-            out, tokenizer, answer_tokenizer, docs,
+            out,
+            tokenizer,
+            answer_tokenizer,
+            docs,
             num_distractors,
         )
         with open(fname, "wb") as f:
