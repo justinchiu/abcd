@@ -461,8 +461,7 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         # PRIOR Z|X
         para_tmp = [[s.argmax().item()] for s in para_preds.view(bs, n_docs)]
         idxes = [s.argmax().item() for s in para_preds.view(bs, n_docs)]
-        # correct z is always 0
-        labels = [[0]] * bs
+        labels = eval_batch.labels
         prior_metric.add_batch(
             predictions=para_tmp,
             references=labels,
