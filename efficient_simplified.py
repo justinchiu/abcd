@@ -412,9 +412,7 @@ def run_model(
 def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
     m = nn.LogSoftmax(dim=-1)
     exact_match = load_metric("exact_match")
-    metric = load_metric("accuracy", "multilabel")
-    prior_exact_match = load_metric("exact_match")
-    prior_metric = load_metric("accuracy", "multilabel")
+    prior_metric = load_metric("accuracy")
     prior_ents = []
     pos_ents = []
     if args.save_results and split == "Valid":
@@ -459,11 +457,10 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         )
 
         # PRIOR Z|X
-        para_tmp = [[s.argmax().item()] for s in para_preds.view(bs, n_docs)]
         idxes = [s.argmax().item() for s in para_preds.view(bs, n_docs)]
         labels = eval_batch.labels
         prior_metric.add_batch(
-            predictions=para_tmp,
+            predictions=idxes,
             references=labels,
         )
 
