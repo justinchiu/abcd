@@ -484,7 +484,8 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         torch.save(
             (para_results, answ_results), f"logging/{args.run_name}|step-{steps}.pt"
         )
-    return z_acc["accuracy"]
+    #return z_acc["accuracy"]
+    return y_exact_match["exact_match"]
 
 
 def main():
@@ -495,7 +496,7 @@ def main():
     )
 
     model_name = args.model_dir.split("/")[-1]
-    run_name = f"model-{model_name} lr-{args.learning_rate} bs-{args.batch_size*args.gradient_accumulation_steps} k-{args.num_distractors} tp-{args.truncate_paragraph} beam-{args.beam} reg-{args.reg_coeff}"
+    run_name = f"model-{model_name} lr-{args.learning_rate} bs-{args.batch_size*args.gradient_accumulation_steps} k-{args.num_distractors} tp-{args.truncate_paragraph} beam-{args.beam} reg-{args.reg_coeff} topk-doc-{args.topk_doc}"
     args.run_name = run_name
     all_layers = prepare_model(args)
     answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)
