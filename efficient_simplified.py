@@ -338,6 +338,7 @@ def run_model(
     t,
     beam=2,
     train=True,
+    num_z=4,
     z_outputs=None,
 ):
     for key in batch:
@@ -364,7 +365,6 @@ def run_model(
         #answer_in, answer_attn, labels = pad_answers(
         #    answer_tokenizer, batch["contexts"], batch["answers"]
         #)
-        num_z = 4
         top_z = p_z.topk(num_z, -1)
 
         answer_in, answer_attn, labels, labels_mask = cat_pad_answers(
@@ -565,6 +565,7 @@ def main():
                 reg_coeff=args.reg_coeff,
                 t=args.sentence_threshold,
                 max_p=args.max_p,
+                num_z=args.topk_doc,
             )
             loss.backward()
             if (
