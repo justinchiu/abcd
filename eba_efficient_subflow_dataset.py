@@ -110,25 +110,26 @@ def preprocess_sents_abcd(data, tokenizer):
                 assert string == xs[x_idx]
                 x_idx += 1
 
-    return x_to_sent_idxs, this_tokenized_sents 
+    return x_to_sent_idxs, tokenized_sents 
 
 
-def encode_abcd(sents, xs, docs, tokenizer, encoder):
+def encode_sents_abcd(sents, tokenizer, encoder):
     device = encoder.device
-    bsz = 32
-
+    bsz = 64
     sentence_vectors = []
-    contextual_sentence_vectors = []
-    doc_sentence_vectors = []
-
     for idx in track(range(0, len(sents), bsz), description="Encode sents"):
         input = tokenizer.pad(
-            [{"input_ids": x} for x in xs[idx:idx+bsz]],
+            [{"input_ids": x} for x in sents[idx:idx+bsz]],
             return_tensors="pt",
         ).to(device)
         output = encoder(**input)
         sentence_vectors.extend(output.pooler_output.cpu().numpy())
+    return sentence_vectors
 
+def encode_xs_abcd(xs, tokenizer, encoder):
+    device = encoder.device
+    bsz = 64
+    contextual_sentence_vectors = []
     for idx in track(range(0, len(xs), bsz), description="Encode x"):
         input = tokenizer.pad(
             [{"input_ids": x} for x in xs[idx:idx+bsz]],
@@ -141,11 +142,15 @@ def encode_abcd(sents, xs, docs, tokenizer, encoder):
         sepmask[:,0] = True # first element is <s>
         # there will be an "extra" vector at the end of the sequence
         # might as well use it
-        for i in range(bsz):
+        for i in range(sepmask.shape[0]):
             hs = output.last_hidden_state[i][sepmask[i]].cpu().numpy()
             contextual_sentence_vectors.append(hs)
+    return contextual_sentence_vectors
 
-    doc_to_vectors = []
+def encode_docs_abcd(docs, tokenizer, encoder):
+    device = encoder.device
+    bsz = 64
+    doc_sentence_vectors = []
     for idx in track(range(0, len(docs), bsz), description="Encode docs"):
         input = tokenizer.pad(
             [{"input_ids": x} for x in docs[idx:idx+bsz]],
@@ -158,11 +163,10 @@ def encode_abcd(sents, xs, docs, tokenizer, encoder):
         sepmask[:,0] = True # first element is <s>
         # there will be an "extra" vector at the end of the sequence
         # might as well use it
-        for i in range(bsz):
+        for i in range(sepmask.shape[0]):
             hs = output.last_hidden_state[i][sepmask[i]].cpu().numpy()
             doc_sentence_vectors.append(hs)
-
-    return sentence_vectors, contextual_sentence_vectors, doc_sentence_vectors
+    return doc_sentence_vectors
 
 
 def prepare_subflow_abcd(
@@ -235,15 +239,36 @@ def prepare_subflow_abcd(
             pickle.dump((x_to_sent_idxs, sents), f)
 
 
-    fname = f"cache/abcd_efficient_emb_{split}.pkl"
+    # pre-encode everything with roberta
+    fname = f"cache/abcd_efficient_enc_sents_{split}.pkl"
     if os.path.isfile(fname):
         with open(fname, "rb") as f:
-            enc_sents, enc_x, enc_docs = pickle.load(f)
+            enc_sents = pickle.load(f)
     else:
         with torch.no_grad():
-            enc_sents, enc_x, enc_docs = encode_abcd(sents, x, docs, tokenizer, encoder)
+            enc_sents = encode_sents_abcd(sents, tokenizer, encoder)
             with open(fname, "wb") as f:
-                pickle.dump((enc_sents, enc_x, enc_docs), f)
+                pickle.dump(enc_sents, f)
+
+    fname = f"cache/abcd_efficient_enc_x_{split}.pkl"
+    if os.path.isfile(fname):
+        with open(fname, "rb") as f:
+            enc_x = pickle.load(f)
+    else:
+        with torch.no_grad():
+            enc_x = encode_xs_abcd(x, tokenizer, encoder)
+            with open(fname, "wb") as f:
+                pickle.dump(enc_x, f)
+
+    fname = f"cache/abcd_efficient_enc_docs_{split}.pkl"
+    if os.path.isfile(fname):
+        with open(fname, "rb") as f:
+            enc_docs = pickle.load(f)
+    else:
+        with torch.no_grad():
+            enc_docs = encode_docs_abcd(docs, tokenizer, encoder)
+            with open(fname, "wb") as f:
+                pickle.dump(enc_docs, f)
 
     return (
         x, answer_x, docs, answer_docs, doc_labels, y,
@@ -260,6 +285,11 @@ class SubflowAbcdDataset(torch.utils.data.Dataset):
         answer_docs,
         answers,
         doc_labels,
+
+        x_to_sent_idxs,
+        enc_sents,
+        enc_x,
+        enc_docs,
     ):
         self.x = x
         self.answer_x = answer_x
@@ -267,6 +297,11 @@ class SubflowAbcdDataset(torch.utils.data.Dataset):
         self.answer_docs = answer_docs
         self.doc_labels = doc_labels
         self.answers = answers
+
+        self.x_to_sent_idxs = x_to_sent_idxs
+        self.enc_sents = enc_sents
+        self.enc_x = enc_x
+        self.enc_docs = enc_docs
 
     def __getitem__(self, idx):
         item = dict()
@@ -276,6 +311,11 @@ class SubflowAbcdDataset(torch.utils.data.Dataset):
         item["answer_docs"] = self.answer_docs
         item["doc_label"] = self.doc_labels[idx]
         item["answer"] = self.answers[idx]
+
+        import pdb; pdb.set_trace()
+        item["enc_x"] = self.enc_x[idx]
+        self.enc_sents = 1
+
         return item
 
     def __len__(self):

@@ -106,15 +106,27 @@ def prepare_model(args):
 
 
 def prepare_dataloader(tok, answer_tok, args, encoder):
-    x, ax, docs, adocs, doc_labels, answers = prepare_subflow_abcd(
+    (
+        x, ax, docs, adocs, doc_labels, answers,
+        x_to_sent_idxs, enc_sents, enc_x, enc_docs,
+    ) = prepare_subflow_abcd(
         tok, answer_tok, "train", encoder=encoder,
     )
-    tx, tax, tdocs, tadocs, tdoc_labels, tanswers = prepare_subflow_abcd(
+    (
+        tx, tax, tdocs, tadocs, tdoc_labels, tanswers,
+        tx_to_sent_idxs, tenc_sents, tenc_x, tenc_docs,
+    ) = prepare_subflow_abcd(
         tok, answer_tok, "val", encoder=encoder,
     )
 
-    train_dataset = SubflowAbcdDataset(x, ax, docs, adocs, doc_labels, answers)
-    eval_dataset = SubflowAbcdDataset(tx, tax, tdocs, tadocs, tdoc_labels, tanswers)
+    train_dataset = SubflowAbcdDataset(
+        x, ax, docs, adocs, doc_labels, answers,
+        x_to_sent_idxs, enc_sents, enc_x, enc_docs,
+    )
+    eval_dataset = SubflowAbcdDataset(
+        tx, tax, tdocs, tadocs, tdoc_labels, tanswers,
+        tx_to_sent_idxs, tenc_sents, tenc_x, tenc_docs,
+    )
 
     data_collator = DataCollatorForMultipleChoice(
         tok, padding="longest", max_length=512
