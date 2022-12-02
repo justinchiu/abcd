@@ -5,6 +5,7 @@ from typing import Optional, Union
 import math
 from tqdm import tqdm
 import wandb
+import numpy as np
 
 # from dataset import prepare_simplified, SimplifiedHotpotQADataset
 # from eba_subflow_dataset import prepare_subflow_abcd, SubflowAbcdDataset
@@ -27,6 +28,19 @@ from eba_utils import prepare_linear, prepare_optim_and_scheduler, padding
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 set_seed(555)
+
+
+def pad_and_mask(xs):
+    lengths = [x.shape[0] for x in xs]
+    bsz = len(lengths)
+    dim = xs[0].shape[1]
+    maxlen = max(lengths)
+    padded = np.zeros((bsz, maxlen, dim), dtype=np.float32)
+    mask = np.zeros((bsz, maxlen), dtype=bool)
+    for i, xlen in enumerate(lengths):
+        mask[i,:xlen] = 1
+        padded[i,:xlen] = xs[i]
+    return padded, mask
 
 
 @dataclass
@@ -84,7 +98,7 @@ class DataCollatorForMultipleChoice:
         assert (batch_docs == batch_answer_docs).all()
         """
 
-        # Add back labels
+        # Add back labels for un-encoded inputs
         batch["lengths"] = lengths
         batch["answers"] = raw_answers
         batch["labels"] = labels
@@ -94,6 +108,27 @@ class DataCollatorForMultipleChoice:
 
         batch["doc_input_ids"] = batch_docs.input_ids
         batch["doc_attention_mask"] = batch_docs.attention_mask
+
+        # encoded inputs
+        enc_x = [feature.pop("enc_x") for feature in features]
+        enc_sents = [feature.pop("enc_sents") for feature in features]
+        enc_docs = [feature.pop("enc_docs") for feature in features][0]
+
+        # perform padding of encoded inputs and get attention_masks
+        enc_x_padded, enc_x_mask = pad_and_mask(enc_x)
+        enc_docs_padded, enc_docs_mask = pad_and_mask(enc_docs)
+        enc_sents_padded, enc_sents_mask = pad_and_mask(enc_sents)
+
+        batch["enc_x_emb"] = torch.tensor(enc_x_padded)
+        batch["enc_x_mask"] = torch.tensor(enc_x_mask)
+        batch["enc_docs_emb"] = torch.tensor(enc_docs_padded)
+        batch["enc_docs_mask"] = torch.tensor(enc_docs_mask)
+        batch["enc_sents_emb"] = torch.tensor(enc_sents_padded)
+        batch["enc_sents_mask"] = torch.tensor(enc_sents_mask)
+
+        # raw x and docs to concat for answer later
+        batch["enc_x"] = enc_x
+        batch["enc_docs"] = enc_docs
 
         return batch
 
@@ -156,7 +191,11 @@ def run_lm(model, batch, bs, train=True, z_outputs=None):
     z = batch.doc_input_ids
     z_attention_mask = batch.doc_attention_mask
 
-    bsz, ndocs = batch.doc_idxs.shape
+    bsz = x.shape[0]
+    ndocs = z.shape[0]
+
+    """
+    # not enough memory! 55 pretty long documents
     x_outputs = model(
         input_ids=x,
         attention_mask=x_attention_mask,
@@ -168,10 +207,30 @@ def run_lm(model, batch, bs, train=True, z_outputs=None):
             attention_mask=z_attention_mask.view(bsz * ndocs, -1),
         )
     z_pooled_output = z_outputs[1].view(bsz, ndocs, -1)
+    """
+
+    # try using pre-computed embeddings
+    x = batch.enc_x_emb
+    x_mask = batch.enc_x_mask
+    z = batch.enc_docs_emb
+    z_mask = batch.enc_docs_mask
+    # worried about scaling.
+    # maybe divide x and z by sqrt(1024)?
+    x_outputs = model(
+        inputs_embeds=x,
+        attention_mask=x_mask,
+    )
+    x_pooled_output = x_outputs[1]
+    if z_outputs is None:
+        z_outputs = model(
+            inputs_embeds=z,
+            attention_mask=z_mask,
+        )
+    z_pooled_output = z_outputs.pooler_output
     logits = torch.einsum(
-        "bh,bdh->bd",
+        "bh,dh->bd",
         x_pooled_output,
-        z_pooled_output.view(bsz, ndocs, -1),
+        z_pooled_output,
     )
     """
     if train:
@@ -185,6 +244,7 @@ def run_lm(model, batch, bs, train=True, z_outputs=None):
         return logits, z_outputs
 
 
+# why isnt this done in the data collator???
 def pad_answers(tokenizer, contexts, raw_answers):
     lens = [len(c) for c in contexts]
     contexts = [c for cs in contexts for c in cs]
@@ -210,14 +270,49 @@ def pad_answers(tokenizer, contexts, raw_answers):
         answers.to(device),
     )
 
+def cat_pad_answers(tokenizer, batch, doc_idxs):
+    doc_idxs = doc_idxs.cpu().numpy()
+    enc_x = batch.enc_x
+    enc_docs = batch.enc_docs
 
-def run_answer_model(model, input_ids, attn_mask, answs, tokenizer, beam, train):
+    # flattened. bsz is outer dimension
+    x_and_z = []
+    for x, idxs in zip(enc_x, doc_idxs):
+        for idx in idxs:
+            z = enc_docs[idx]
+            x_and_z.append(np.concatenate((x, z), 0))
+    xz_emb, xz_mask = pad_and_mask(x_and_z)
+
+    raw_answers = batch.answers
+    lens = [doc_idxs.shape[1]] * doc_idxs.shape[0]
+    raw_answers = [[a] * l for a, l in zip(raw_answers, lens)]
+    raw_answers = [a for ans in raw_answers for a in ans]
+    raw_answers = [{"input_ids": a} for a in raw_answers]
+    answers_out = tokenizer.pad(
+        raw_answers,
+        padding="longest",
+        return_tensors="pt",
+    ).to(device)
+
+    return (
+        torch.tensor(xz_emb).to(device),
+        torch.tensor(xz_mask).to(device),
+        answers_out.input_ids,
+        answers_out.attention_mask.bool(),
+    )
+
+
+def run_answer_model(model, inputs_embeds, attn_mask, answs, tokenizer, beam, train):
     answs[answs == model.config.pad_token_id] = -100
     if train:
-        outputs = model(input_ids=input_ids, attention_mask=attn_mask, labels=answs)
+        outputs = model(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attn_mask,
+            labels=answs,
+        )
     else:
         outputs = model.generate(
-            input_ids,
+            inputs_embeds=inputs_embeds,
             num_beams=beam,
             min_length=1,
             max_length=20,
@@ -253,15 +348,27 @@ def run_model(
             "doc_idxs",
             "doc_input_ids",
             "doc_attention_mask",
+            "enc_x_emb",
+            "enc_x_mask",
+            "enc_docs_emb",
+            "enc_docs_mask",
+            "enc_sents_emb",
+            "enc_sents_mask",
         ]:
             # doc_input_ids, doc_attention_mask should be cached
             batch[key] = batch[key].to(device)
     bs = len(batch.answers)
     z_size = len(batch.docs)
-    pouts, z_outputs = run_lm(layers, batch, bs, train=train, z_outputs=z_outputs)
+    p_z, z_outputs = run_lm(layers, batch, bs, train=train, z_outputs=z_outputs)
     if train:
-        answer_in, answer_attn, labels = pad_answers(
-            answer_tokenizer, batch["contexts"], batch["answers"]
+        #answer_in, answer_attn, labels = pad_answers(
+        #    answer_tokenizer, batch["contexts"], batch["answers"]
+        #)
+        num_z = 4
+        top_z = p_z.topk(num_z, -1)
+
+        answer_in, answer_attn, labels, labels_mask = cat_pad_answers(
+            answer_tokenizer, batch, top_z.indices,
         )
         in_len = len(answer_in)
         answ_out = run_answer_model(
@@ -277,15 +384,15 @@ def run_model(
         logits = answ_out.logits.log_softmax(-1)
         # ASSUME N = total num documents during training
         N, T, V = logits.shape
-        loss = logits[torch.arange(N)[:, None], torch.arange(T), labels]
-        loss = -(loss.sum(-1) + pouts).logsumexp(-1).mean()
+        loss = logits[torch.arange(N)[:, None], torch.arange(T), labels].view(bs, num_z, -1)
+        loss[~labels_mask.view(bs, num_z, -1)] = 0
+        loss = -(loss.sum(-1) + top_z.values).logsumexp(-1).mean()
     else:
         # pick out argmax contexts
         # assuming pouts: bs * z_size
-        idxs = pouts.view(bs, z_size).argmax(-1).tolist()
-        contexts = [[c[i]] for i, c in zip(idxs, batch["contexts"])]
-        answer_in, answer_attn, labels = pad_answers(
-            answer_tokenizer, contexts, batch["answers"]
+        idxs = p_z.view(bs, z_size).argmax(-1).view(-1, 1)
+        answer_in, answer_attn, labels, labels_mask = cat_pad_answers(
+            answer_tokenizer, batch, idxs,
         )
         in_len = len(answer_in)
         # only run answer prediction for argmax context
@@ -299,7 +406,7 @@ def run_model(
             train=train,
         )
         loss = 0.0
-    return answ_out, pouts, loss, z_outputs
+    return answ_out, p_z, loss, z_outputs
 
 
 def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
@@ -317,11 +424,11 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
     z_outputs = None
     for step, eval_batch in track(enumerate(dataloader), total=len(dataloader)):
         # for step, eval_batch in enumerate(dataloader):
-        bs = len(eval_batch["answers"])
-        n_distractors = len(eval_batch["contexts"][0])
+        bs = len(eval_batch.answers)
+        n_docs = len(eval_batch.docs)
 
         # ANSWER EVAL Y|X
-        gold = answ_tok.batch_decode(eval_batch["answers"], skip_special_tokens=True)
+        gold = answ_tok.batch_decode(eval_batch.answers, skip_special_tokens=True)
         # ONLY DOING TOP-1
         eval_outs, para_preds, _, z_outputs = run_model(
             eval_batch,
@@ -352,8 +459,8 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         )
 
         # PRIOR Z|X
-        para_tmp = [[s.argmax().item()] for s in para_preds.view(bs, n_distractors)]
-        idxes = [s.argmax().item() for s in para_preds.view(bs, n_distractors)]
+        para_tmp = [[s.argmax().item()] for s in para_preds.view(bs, n_docs)]
+        idxes = [s.argmax().item() for s in para_preds.view(bs, n_docs)]
         # correct z is always 0
         labels = [[0]] * bs
         prior_metric.add_batch(

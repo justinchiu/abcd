@@ -283,8 +283,8 @@ class SubflowAbcdDataset(torch.utils.data.Dataset):
         answer_x,
         docs,
         answer_docs,
-        answers,
         doc_labels,
+        answers,
 
         x_to_sent_idxs,
         enc_sents,
@@ -312,9 +312,14 @@ class SubflowAbcdDataset(torch.utils.data.Dataset):
         item["doc_label"] = self.doc_labels[idx]
         item["answer"] = self.answers[idx]
 
-        import pdb; pdb.set_trace()
         item["enc_x"] = self.enc_x[idx]
-        self.enc_sents = 1
+        item["enc_docs"] = self.enc_docs
+
+        item["sent_idxs"] = self.x_to_sent_idxs[idx]
+        item["enc_sents"] = np.concatenate(
+            [self.enc_sents[i][None] for i in self.x_to_sent_idxs[idx]],
+            0,
+        )
 
         return item
 
