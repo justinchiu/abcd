@@ -536,7 +536,6 @@ def evaluate(
 
         # PRIOR Z|X
         if not all_docs:
-            print("NOT FULL")
             n_docs = eval_batch.doc_idxs.shape[1]
             idxes = [s.argmax().item() for s in para_preds.view(bs, n_docs)]
             contrastive_prior_metric.add_batch(
