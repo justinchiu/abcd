@@ -382,6 +382,7 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
     # return y_exact_match['exact_match']
     return z_acc["accuracy"]
 
+
 def evaluate_full(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
     m = nn.LogSoftmax(dim=-1)
     exact_match = load_metric("exact_match")

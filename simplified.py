@@ -7,8 +7,9 @@ from tqdm import tqdm
 import wandb
 
 # from dataset import prepare_simplified, SimplifiedHotpotQADataset
-# from eba_subflow_dataset import prepare_subflow_abcd, SubflowAbcdDataset
-from eba_subflow_factored_dataset import prepare_subflow_abcd, SubflowAbcdDataset
+from eba_subflow_dataset import prepare_subflow_abcd, SubflowAbcdDataset
+
+# from eba_subflow_factored_dataset import prepare_subflow_abcd, SubflowAbcdDataset
 from datasets import load_metric
 from rich.progress import track
 from transformers import AutoModel, AutoModelForSeq2SeqLM
@@ -324,8 +325,8 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         torch.save(
             (para_results, answ_results), f"logging/{args.run_name}|step-{steps}.pt"
         )
-    # return y_exact_match['exact_match']
-    return z_acc["accuracy"]
+    return y_exact_match["exact_match"]
+    # return z_acc["accuracy"]
 
 
 def main():
@@ -340,7 +341,7 @@ def main():
     )
 
     model_name = args.model_dir.split("/")[-1]
-    run_name = f"model-{model_name} lr-{args.learning_rate} bs-{args.batch_size*args.gradient_accumulation_steps} k-{args.num_distractors} tp-{args.truncate_paragraph} beam-{args.beam} reg-{args.reg_coeff}"
+    run_name = f"simplified-model-{model_name} lr-{args.learning_rate} bs-{args.batch_size*args.gradient_accumulation_steps} k-{args.num_distractors} tp-{args.truncate_paragraph} beam-{args.beam} reg-{args.reg_coeff}"
     args.run_name = run_name
     all_layers = prepare_model(args)
     answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)

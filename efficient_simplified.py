@@ -38,8 +38,8 @@ def pad_and_mask(xs):
     padded = np.zeros((bsz, maxlen, dim), dtype=np.float32)
     mask = np.zeros((bsz, maxlen), dtype=bool)
     for i, xlen in enumerate(lengths):
-        mask[i,:xlen] = 1
-        padded[i,:xlen] = xs[i]
+        mask[i, :xlen] = 1
+        padded[i, :xlen] = xs[i]
     return padded, mask
 
 
@@ -142,25 +142,63 @@ def prepare_model(args):
 
 def prepare_dataloader(tok, answer_tok, args, encoder):
     (
-        x, ax, docs, adocs, doc_labels, answers,
-        x_to_sent_idxs, enc_sents, enc_x, enc_docs,
+        x,
+        ax,
+        docs,
+        adocs,
+        doc_labels,
+        answers,
+        x_to_sent_idxs,
+        enc_sents,
+        enc_x,
+        enc_docs,
     ) = prepare_subflow_abcd(
-        tok, answer_tok, "train", encoder=encoder,
+        tok,
+        answer_tok,
+        "train",
+        encoder=encoder,
     )
     (
-        tx, tax, tdocs, tadocs, tdoc_labels, tanswers,
-        tx_to_sent_idxs, tenc_sents, tenc_x, tenc_docs,
+        tx,
+        tax,
+        tdocs,
+        tadocs,
+        tdoc_labels,
+        tanswers,
+        tx_to_sent_idxs,
+        tenc_sents,
+        tenc_x,
+        tenc_docs,
     ) = prepare_subflow_abcd(
-        tok, answer_tok, "val", encoder=encoder,
+        tok,
+        answer_tok,
+        "val",
+        encoder=encoder,
     )
 
     train_dataset = SubflowAbcdDataset(
-        x, ax, docs, adocs, doc_labels, answers,
-        x_to_sent_idxs, enc_sents, enc_x, enc_docs,
+        x,
+        ax,
+        docs,
+        adocs,
+        doc_labels,
+        answers,
+        x_to_sent_idxs,
+        enc_sents,
+        enc_x,
+        enc_docs,
     )
     eval_dataset = SubflowAbcdDataset(
-        tx, tax, tdocs, tadocs, tdoc_labels, tanswers,
-        tx_to_sent_idxs, tenc_sents, tenc_x, tenc_docs,
+        tx,
+        tax,
+        tdocs,
+        tadocs,
+        tdoc_labels,
+        tanswers,
+        tx_to_sent_idxs,
+        tenc_sents,
+        tenc_x,
+        tenc_docs,
     )
 
     data_collator = DataCollatorForMultipleChoice(
@@ -270,6 +308,7 @@ def pad_answers(tokenizer, contexts, raw_answers):
         answers.to(device),
     )
 
+
 def cat_pad_answers(tokenizer, batch, doc_idxs):
     doc_idxs = doc_idxs.cpu().numpy()
     enc_x = batch.enc_x
@@ -362,13 +401,15 @@ def run_model(
     z_size = len(batch.docs)
     p_z, z_outputs = run_lm(layers, batch, bs, train=train, z_outputs=z_outputs)
     if train:
-        #answer_in, answer_attn, labels = pad_answers(
+        # answer_in, answer_attn, labels = pad_answers(
         #    answer_tokenizer, batch["contexts"], batch["answers"]
-        #)
+        # )
         top_z = p_z.topk(num_z, -1)
 
         answer_in, answer_attn, labels, labels_mask = cat_pad_answers(
-            answer_tokenizer, batch, top_z.indices,
+            answer_tokenizer,
+            batch,
+            top_z.indices,
         )
         in_len = len(answer_in)
         answ_out = run_answer_model(
@@ -384,7 +425,9 @@ def run_model(
         logits = answ_out.logits.log_softmax(-1)
         # ASSUME N = total num documents during training
         N, T, V = logits.shape
-        loss = logits[torch.arange(N)[:, None], torch.arange(T), labels].view(bs, num_z, -1)
+        loss = logits[torch.arange(N)[:, None], torch.arange(T), labels].view(
+            bs, num_z, -1
+        )
         loss[~labels_mask.view(bs, num_z, -1)] = 0
         loss = -(loss.sum(-1) + top_z.values).logsumexp(-1).mean()
     else:
@@ -392,7 +435,9 @@ def run_model(
         # assuming pouts: bs * z_size
         idxs = p_z.view(bs, z_size).argmax(-1).view(-1, 1)
         answer_in, answer_attn, labels, labels_mask = cat_pad_answers(
-            answer_tokenizer, batch, idxs,
+            answer_tokenizer,
+            batch,
+            idxs,
         )
         in_len = len(answer_in)
         # only run answer prediction for argmax context

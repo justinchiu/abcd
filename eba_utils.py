@@ -84,6 +84,12 @@ def get_args():
         help="number of steps between each evaluation.",
     )
     parser.add_argument(
+        "--full_eval_steps",
+        default=50000,
+        type=int,
+        help="number of steps between each FULL/expensive evaluation.",
+    )
+    parser.add_argument(
         "--epoch",
         "-epoch",
         default=5,

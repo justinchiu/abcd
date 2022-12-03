@@ -50,7 +50,8 @@ class DataCollatorForMultipleChoice:
     padding: Union[bool, str, PaddingStrategy] = True
     max_length: Optional[int] = None
     pad_to_multiple_of: Optional[int] = None
-    sep_idx = 2
+    sep_idx: int = 2
+    num_distractors: int = 3
 
     def __call__(self, features):
         # features[i].keys() == x, answer_x, docs, answer_docs, doc_label, answer
@@ -83,7 +84,7 @@ class DataCollatorForMultipleChoice:
         for label in labels:
             s = set(range(num_docs))
             s.remove(label)
-            distractors = random.sample(list(s), 3)
+            distractors = random.sample(list(s), self.num_distractors)
             z_idxs = [label] + distractors
             doc_idxs.append(z_idxs)
 
@@ -214,7 +215,10 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
     )
 
     data_collator = DataCollatorForMultipleChoice(
-        tok, padding="longest", max_length=512
+        tok,
+        padding="longest",
+        max_length=512,
+        num_distractors=args.num_distractors,
     )
 
     train_dataloader = DataLoader(
@@ -229,79 +233,62 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
         collate_fn=data_collator,
         batch_size=args.eval_batch_size,
     )
+    slow_eval_dataloader = DataLoader(
+        eval_dataset,
+        shuffle=False,
+        collate_fn=data_collator,
+        batch_size=1,
+    )
 
-    return train_dataloader, eval_dataloader
+    return train_dataloader, eval_dataloader, slow_eval_dataloader
 
 
-def run_lm(model, batch, bs, train=True, z_outputs=None):
+def run_lm(
+    model,
+    batch,
+    bs,
+    tokenizer,
+    train=True,
+    all_docs=False,
+    z_outputs=None,
+):
     model, linear = model
 
-    x = batch["input_ids"]
-    x_attention_mask = batch["attention_mask"]
+    bsz = len(batch.raw_xs)
+    n_docs = 55 if all_docs else batch.doc_idxs.shape[1]
 
-    # contrastive
-    z = batch.doc_input_ids[batch.doc_idxs]
-    z_attention_mask = batch.doc_attention_mask[batch.doc_idxs]
-
-    bsz = x.shape[0]
-    ndocs = z.shape[1] if train else 55
-
-    x_outputs = model(
-        input_ids=x,
-        attention_mask=x_attention_mask,
-    )
-    x_pooled_output = x_outputs[1]
-
-    if z_outputs is None:
-        z_outputs = model(
-            input_ids=z.view(bsz * ndocs, -1),
-            attention_mask=z_attention_mask.view(bsz * ndocs, -1),
-        )
-    z_pooled_output = (
-        z_outputs[1].view(bsz, ndocs, 1024)
-        if train
-        else z_outputs.pooler_output.view(1, ndocs, 1024)
+    docs = (
+        [[batch.docs[i] for i in doc_idxs] for doc_idxs in batch.doc_idxs]
+        if not all_docs
+        else [batch.docs] * bsz
     )
 
-    """
-    # try using pre-computed embeddings
-    x = batch.enc_x_emb
-    x_mask = batch.enc_x_mask
-    z = batch.enc_docs_emb
-    z_mask = batch.enc_docs_mask
-    # worried about scaling.
-    # maybe divide x and z by sqrt(1024)?
-    x_outputs = model(
-        inputs_embeds=x,
-        attention_mask=x_mask,
+    input, mask = pad_contexts(
+        tokenizer,
+        batch.raw_xs,
+        docs,
     )
-    x_pooled_output = x_outputs[1]
-    if z_outputs is None:
-        z_outputs = model(
-            inputs_embeds=z,
-            attention_mask=z_mask,
-        )
-    z_pooled_output = z_outputs.pooler_output
-    """
 
-    logits = torch.einsum(
-        "bh,bdh->bd",
-        x_pooled_output,
-        z_pooled_output,
+    outputs = model(
+        input_ids=input,
+        attention_mask=mask,
     )
+
+    # should be bsz x ndocs
+    logits = linear(outputs.pooler_output).view(bsz, n_docs)
     """
     if train:
         dropout = nn.Dropout(model.config.hidden_dropout_prob)
         pooled_output = dropout(pooled_output)
     logits = linear(pooled_output).view(bsz, ndocs)
     """
+    z_outputs = None
     if train:
-        return logits.log_softmax(-1), None
+        return logits.log_softmax(-1), z_outputs
     else:
         return logits, z_outputs
 
 
-# why isnt this done in the data collator???
 def pad_answers(tokenizer, xs, docs, raw_answers):
     # concatenate xs and docs into contexts
     # add eos at the end
@@ -336,35 +323,27 @@ def pad_answers(tokenizer, xs, docs, raw_answers):
     )
 
 
-def cat_pad_answers(tokenizer, batch, doc_idxs):
-    doc_idxs = doc_idxs.cpu().numpy()
-    enc_x = batch.enc_x
-    enc_docs = batch.enc_docs
+def pad_contexts(tokenizer, xs, docs):
+    # concatenate xs and docs into contexts
+    # add eos at the end
+    contexts = [[x + d + [2] for d in ds] for x, ds in zip(xs, docs)]
+    lens = [len(c) for c in contexts]
+    contexts = [c for cs in contexts for c in cs]
 
-    # flattened. bsz is outer dimension
-    x_and_z = []
-    for x, idxs in zip(enc_x, doc_idxs):
-        for idx in idxs:
-            z = enc_docs[idx]
-            x_and_z.append(np.concatenate((x, z), 0))
-    xz_emb, xz_mask = pad_and_mask(x_and_z)
+    # truncate from left
+    maxlen = 512
+    contexts = [c if len(c) < maxlen else c[-maxlen:] for c in contexts]
 
-    raw_answers = batch.answers
-    lens = [doc_idxs.shape[1]] * doc_idxs.shape[0]
-    raw_answers = [[a] * l for a, l in zip(raw_answers, lens)]
-    raw_answers = [a for ans in raw_answers for a in ans]
-    raw_answers = [{"input_ids": a} for a in raw_answers]
-    answers_out = tokenizer.pad(
-        raw_answers,
+    contexts = [{"input_ids": c} for c in contexts]
+    out = tokenizer.pad(
+        contexts,
         padding="longest",
         return_tensors="pt",
     ).to(device)
 
     return (
-        torch.tensor(xz_emb).to(device),
-        torch.tensor(xz_mask).to(device),
-        answers_out.input_ids,
-        answers_out.attention_mask.bool(),
+        out.input_ids,
+        out.attention_mask,
     )
 
 
@@ -406,6 +385,7 @@ def run_model(
     train=True,
     num_z=4,
     z_outputs=None,
+    all_docs=False,
 ):
     for key in batch:
         # if key == "input_ids" or key == "attention_mask":
@@ -425,8 +405,15 @@ def run_model(
             # doc_input_ids, doc_attention_mask should be cached
             batch[key] = batch[key].to(device)
     bs = len(batch.answers)
-    z_size = len(batch.docs)
-    p_z, z_outputs = run_lm(layers, batch, bs, train=train, z_outputs=z_outputs)
+    p_z, z_outputs = run_lm(
+        layers,
+        batch,
+        bs,
+        tokenizer,
+        train=train,
+        z_outputs=z_outputs,
+        all_docs=all_docs,
+    )
     if train:
         answer_in, answer_attn, labels, labels_mask = pad_answers(
             answer_tokenizer,
@@ -461,7 +448,7 @@ def run_model(
     else:
         # pick out argmax contexts
         # assuming pouts: bs * z_size
-        assert z_size == 55
+        z_size = len(batch.docs) if all_docs else batch.doc_idxs.shape[1]
         idxs = p_z.view(bs, z_size).argmax(-1).view(-1, 1)
         answer_in, answer_attn, labels, labels_mask = pad_answers(
             answer_tokenizer,
@@ -484,7 +471,18 @@ def run_model(
     return answ_out, p_z, loss, z_outputs
 
 
-def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
+def evaluate(
+    steps,
+    args,
+    layers,
+    answ_model,
+    tok,
+    answ_tok,
+    dataloader,
+    split,
+    all_docs=False,
+    slow_eval_dataloader=None,
+):
     m = nn.LogSoftmax(dim=-1)
     exact_match = load_metric("exact_match")
     prior_metric = load_metric("accuracy")
@@ -496,22 +494,14 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         para_results = []
         answ_results = []
 
-    z_outputs = None
+    if all_docs:
+        dataloader = slow_eval_dataloader
+
     # run evaluation
-    # for step, eval_batch in enumerate(dataloader):
-    for step, eval_batch in track(enumerate(dataloader), total=len(dataloader)):
+    for step, eval_batch in enumerate(dataloader):
+        # for step, eval_batch in track(enumerate(dataloader), total=len(dataloader)):
         bs = len(eval_batch.answers)
         n_docs = len(eval_batch.docs)
-
-        if z_outputs is None:
-            # precompute z_outputs
-            z = eval_batch.doc_input_ids.to(device)
-            z_attention_mask = eval_batch.doc_attention_mask.to(device)
-
-            z_outputs = layers[0](
-                input_ids=z,
-                attention_mask=z_attention_mask,
-            )
 
         # ANSWER EVAL Y|X
         gold = answ_tok.batch_decode(eval_batch.answers, skip_special_tokens=True)
@@ -527,7 +517,8 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
             t=args.sentence_threshold,
             train=False,
             beam=args.beam,
-            z_outputs=z_outputs,
+            z_outputs=None,
+            all_docs=all_docs,
         )
 
         eval_outs, scores = eval_outs
@@ -544,35 +535,43 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         )
 
         # PRIOR Z|X
-        idxes = [s.argmax().item() for s in para_preds.view(bs, n_docs)]
-        labels = eval_batch.labels
-        prior_metric.add_batch(
-            predictions=idxes,
-            references=labels,
-        )
+        if not all_docs:
+            print("NOT FULL")
+            n_docs = eval_batch.doc_idxs.shape[1]
+            idxes = [s.argmax().item() for s in para_preds.view(bs, n_docs)]
+            contrastive_prior_metric.add_batch(
+                predictions=idxes,
+                references=[0] * bs,
+            )
+        else:
+            print("FULL")
+            idxes = [s.argmax().item() for s in para_preds]
+            labels = eval_batch.labels
+            prior_metric.add_batch(
+                predictions=idxes,
+                references=labels,
+            )
+
+            contrastive_scores = para_preds[
+                torch.arange(bs)[:, None],
+                eval_batch.doc_idxs,
+            ]
+            contrastive_preds = contrastive_scores.argmax(-1)
+            contrastive_prior_metric.add_batch(
+                predictions=contrastive_preds,
+                references=[0] * bs,
+            )
 
         if args.save_results and split == "Valid":
             para_results += idxes
 
-        contrastive_scores = para_preds[
-            torch.arange(bs)[:, None],
-            eval_batch.doc_idxs,
-        ]
-        contrastive_preds = contrastive_scores.argmax(-1)
-        contrastive_prior_metric.add_batch(
-            predictions=contrastive_preds,
-            references=[0] * bs,
-        )
-
     y_exact_match = exact_match.compute()
-    z_acc = prior_metric.compute()
     z_contrastive_acc = contrastive_prior_metric.compute()
     if not args.nolog:
         wandb.log(
             {
                 "step": steps,
                 f"{split} Answer EM": y_exact_match,
-                f"{split} Subflow Acc": z_acc,
                 f"{split} Contrastive Subflow Acc": z_contrastive_acc,
             }
         )
@@ -581,7 +580,7 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
             (para_results, answ_results), f"logging/{args.run_name}|step-{steps}.pt"
         )
     # return z_acc["accuracy"]
-    print(z_acc["accuracy"])
+    print(z_contrastive_acc["accuracy"])
     return y_exact_match["exact_match"]
 
 
@@ -593,13 +592,13 @@ def main():
     )
 
     model_name = args.model_dir.split("/")[-1]
-    run_name = f"fact2-model-{model_name} lr-{args.learning_rate} bs-{args.batch_size*args.gradient_accumulation_steps} k-{args.num_distractors} tp-{args.truncate_paragraph} beam-{args.beam} reg-{args.reg_coeff} topk-doc-{args.topk_doc}"
+    run_name = f"simp2-model-{model_name} lr-{args.learning_rate} bs-{args.batch_size*args.gradient_accumulation_steps} k-{args.num_distractors} tp-{args.truncate_paragraph} beam-{args.beam} reg-{args.reg_coeff} topk-doc-{args.topk_doc}"
     args.run_name = run_name
     all_layers = prepare_model(args)
     answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)
     answer_model = answer_model.to(device)
 
-    train_dataloader, eval_dataloader = prepare_dataloader(
+    train_dataloader, eval_dataloader, slow_eval_dataloader = prepare_dataloader(
         tokenizer,
         answer_tokenizer,
         args,
@@ -644,6 +643,8 @@ def main():
                         answer_tokenizer,
                         eval_dataloader,
                         "Valid",
+                        all_docs=completed_steps % args.full_eval_steps == 0,
+                        slow_eval_dataloader=slow_eval_dataloader,
                     )
                 if valid_acc > best_valid:
                     best_valid = valid_acc

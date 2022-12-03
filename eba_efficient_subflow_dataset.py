@@ -29,7 +29,7 @@ def preprocess_subflow_abcd_docs(split, tok, answ_tok, sep_token="</s>"):
         for flow, subflow_doc in docs.items():
             for subflow, sentences in subflow_doc.items():
                 flow_subflow_to_idx[(flow, subflow)] = len(subflows)
-                #subflow = f" {sep_token} ".join(sentences)
+                # subflow = f" {sep_token} ".join(sentences)
                 subflow = " ".join(sentences)
                 subflows.append(subflow)
 
@@ -104,16 +104,16 @@ def preprocess_sents_abcd(data, tokenizer):
         x_idx = 0
         for i, is_turn in enumerate(is_turns):
             if is_turn:
-                x_to_sent_idxs.append(idxs[:i+1].tolist())
-                #string = " </s> ".join([sents[i] for i in idxs[:i+1]])
-                string = " ".join([sents[i] for i in idxs[:i+1]])
-                #print(string == xs[x_idx])
-                #print(string)
-                #print(xs[x_idx])
+                x_to_sent_idxs.append(idxs[: i + 1].tolist())
+                # string = " </s> ".join([sents[i] for i in idxs[:i+1]])
+                string = " ".join([sents[i] for i in idxs[: i + 1]])
+                # print(string == xs[x_idx])
+                # print(string)
+                # print(xs[x_idx])
                 assert string == xs[x_idx]
                 x_idx += 1
 
-    return x_to_sent_idxs, tokenized_sents 
+    return x_to_sent_idxs, tokenized_sents
 
 
 def encode_sents_abcd(sents, tokenizer, encoder):
@@ -122,12 +122,13 @@ def encode_sents_abcd(sents, tokenizer, encoder):
     sentence_vectors = []
     for idx in track(range(0, len(sents), bsz), description="Encode sents"):
         input = tokenizer.pad(
-            [{"input_ids": x} for x in sents[idx:idx+bsz]],
+            [{"input_ids": x} for x in sents[idx : idx + bsz]],
             return_tensors="pt",
         ).to(device)
         output = encoder(**input)
         sentence_vectors.extend(output.pooler_output.cpu().numpy())
     return sentence_vectors
+
 
 def encode_xs_abcd(xs, tokenizer, encoder):
     device = encoder.device
@@ -135,14 +136,14 @@ def encode_xs_abcd(xs, tokenizer, encoder):
     contextual_sentence_vectors = []
     for idx in track(range(0, len(xs), bsz), description="Encode x"):
         input = tokenizer.pad(
-            [{"input_ids": x} for x in xs[idx:idx+bsz]],
+            [{"input_ids": x} for x in xs[idx : idx + bsz]],
             return_tensors="pt",
         ).to(device)
         output = encoder(**input)
 
         # sepmask should be true at <s> or </s>
         sepmask = input.input_ids == 2
-        sepmask[:,0] = True # first element is <s>
+        sepmask[:, 0] = True  # first element is <s>
         # there will be an "extra" vector at the end of the sequence
         # might as well use it
         for i in range(sepmask.shape[0]):
@@ -150,20 +151,21 @@ def encode_xs_abcd(xs, tokenizer, encoder):
             contextual_sentence_vectors.append(hs)
     return contextual_sentence_vectors
 
+
 def encode_docs_abcd(docs, tokenizer, encoder):
     device = encoder.device
     bsz = 64
     doc_sentence_vectors = []
     for idx in track(range(0, len(docs), bsz), description="Encode docs"):
         input = tokenizer.pad(
-            [{"input_ids": x} for x in docs[idx:idx+bsz]],
+            [{"input_ids": x} for x in docs[idx : idx + bsz]],
             return_tensors="pt",
         ).to(device)
         output = encoder(**input)
 
         # sepmask should be true at <s> or </s>
         sepmask = input.input_ids == 2
-        sepmask[:,0] = True # first element is <s>
+        sepmask[:, 0] = True  # first element is <s>
         # there will be an "extra" vector at the end of the sequence
         # might as well use it
         for i in range(sepmask.shape[0]):
@@ -173,7 +175,10 @@ def encode_docs_abcd(docs, tokenizer, encoder):
 
 
 def prepare_subflow_abcd(
-    tokenizer, answer_tokenizer, split, path="eba_data",
+    tokenizer,
+    answer_tokenizer,
+    split,
+    path="eba_data",
     encoder=None,
 ):
     print(f"prepare abcd {split}")
@@ -241,7 +246,6 @@ def prepare_subflow_abcd(
         with open(fname, "wb") as f:
             pickle.dump((x_to_sent_idxs, sents), f)
 
-
     # pre-encode everything with roberta
     fname = f"cache/abcd_efficient_enc_sents_{split}.pkl"
     if os.path.isfile(fname):
@@ -274,8 +278,16 @@ def prepare_subflow_abcd(
                 pickle.dump(enc_docs, f)
 
     return (
-        x, answer_x, docs, answer_docs, doc_labels, y,
-        x_to_sent_idxs, enc_sents, enc_x, enc_docs,
+        x,
+        answer_x,
+        docs,
+        answer_docs,
+        doc_labels,
+        y,
+        x_to_sent_idxs,
+        enc_sents,
+        enc_x,
+        enc_docs,
     )
 
 
@@ -288,7 +300,6 @@ class SubflowAbcdDataset(torch.utils.data.Dataset):
         answer_docs,
         doc_labels,
         answers,
-
         x_to_sent_idxs,
         enc_sents,
         enc_x,
