@@ -481,7 +481,7 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         torch.save(
             (para_results, answ_results), f"logging/{args.run_name}|step-{steps}.pt"
         )
-    #return z_acc["accuracy"]
+    print(z_acc["accuracy"])
     return y_exact_match["exact_match"]
 
 

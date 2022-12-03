@@ -29,7 +29,8 @@ def preprocess_subflow_abcd_docs(split, tok, answ_tok, sep_token="</s>"):
         for flow, subflow_doc in docs.items():
             for subflow, sentences in subflow_doc.items():
                 flow_subflow_to_idx[(flow, subflow)] = len(subflows)
-                subflow = f" {sep_token} ".join(sentences)
+                #subflow = f" {sep_token} ".join(sentences)
+                subflow = " ".join(sentences)
                 subflows.append(subflow)
 
         # different tokenizers for document choice and answer choice
@@ -72,6 +73,7 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, flow_subflow, sep=" "):
     assert len(tokenized_x) == len(answer_tokenized_x) == len(tokenized_y)
     return tokenized_x, answer_tokenized_x, doc_labels, tokenized_y
 
+
 def preprocess_sents_abcd(data, tokenizer):
     x_to_sent_idxs = []
     sents = []
@@ -103,7 +105,8 @@ def preprocess_sents_abcd(data, tokenizer):
         for i, is_turn in enumerate(is_turns):
             if is_turn:
                 x_to_sent_idxs.append(idxs[:i+1].tolist())
-                string = " </s> ".join([sents[i] for i in idxs[:i+1]])
+                #string = " </s> ".join([sents[i] for i in idxs[:i+1]])
+                string = " ".join([sents[i] for i in idxs[:i+1]])
                 #print(string == xs[x_idx])
                 #print(string)
                 #print(xs[x_idx])
