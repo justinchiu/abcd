@@ -498,8 +498,8 @@ def evaluate(
         dataloader = slow_eval_dataloader
 
     # run evaluation
-    for step, eval_batch in enumerate(dataloader):
-        # for step, eval_batch in track(enumerate(dataloader), total=len(dataloader)):
+    #for step, eval_batch in enumerate(dataloader):
+    for step, eval_batch in track(enumerate(dataloader), total=len(dataloader)):
         bs = len(eval_batch.answers)
         n_docs = len(eval_batch.docs)
 
