@@ -648,9 +648,9 @@ def main():
                 if valid_acc > best_valid:
                     best_valid = valid_acc
                     if args.save_model:
-                        all_layers[0].save_pretrained(
-                            f"{args.output_model_dir}/{run_name}"
-                        )
+                        all_layers[0].save_pretrained(f"{args.output_model_dir}/{run_name}")
+                        torch.save(all_layers[1:], f"{args.output_model_dir}/{run_name}-others.pt")
+                        answer_model.save_pretrained(f"{args.output_model_dir}/{run_name}-answer")
                 all_layers[0].train()
                 answer_model.train()
             _, _, loss, _ = run_model(

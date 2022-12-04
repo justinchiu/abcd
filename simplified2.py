@@ -567,19 +567,28 @@ def evaluate(
     y_exact_match = exact_match.compute()
     z_contrastive_acc = contrastive_prior_metric.compute()
     if not args.nolog:
-        wandb.log(
-            {
-                "step": steps,
-                f"{split} Answer EM": y_exact_match,
-                f"{split} Contrastive Subflow Acc": z_contrastive_acc,
-            }
-        )
+        results = {
+            "step": steps,
+            f"{split} Answer EM": y_exact_match,
+            f"{split} Contrastive Subflow Acc": z_contrastive_acc,
+        }
+        if all_docs:
+            # add the all doc z accuracy
+            z_acc = prior_metric.compute()
+            results[f"{split} Subflow Acc"] = z_acc
+
+        wandb.log(results)
+
     if args.save_results and split == "Valid":
         torch.save(
             (para_results, answ_results), f"logging/{args.run_name}|step-{steps}.pt"
         )
+
     # return z_acc["accuracy"]
     print(z_contrastive_acc["accuracy"])
+    if all_docs:
+        print(z_acc["accuracy"])
+
     return y_exact_match["exact_match"]
 
 
@@ -648,9 +657,9 @@ def main():
                 if valid_acc > best_valid:
                     best_valid = valid_acc
                     if args.save_model:
-                        all_layers[0].save_pretrained(
-                            f"{args.output_model_dir}/{run_name}"
-                        )
+                        all_layers[0].save_pretrained(f"{args.output_model_dir}/{run_name}")
+                        torch.save(all_layers[1:], f"{args.output_model_dir}/{run_name}-others.pt")
+                        answer_model.save_pretrained(f"{args.output_model_dir}/{run_name}-answer")
                 all_layers[0].train()
                 answer_model.train()
             _, _, loss, _ = run_model(
