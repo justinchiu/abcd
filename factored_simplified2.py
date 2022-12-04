@@ -493,8 +493,13 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
     prior_ents = []
     pos_ents = []
     if args.save_results and split == "Valid":
-        para_results = []
-        answ_results = []
+        con_preds = []
+        con_golds = []
+        con_docs = []
+        doc_preds = []
+        doc_golds = []
+        answer_preds = []
+        answer_golds = []
 
     z_outputs = None
     # run evaluation
@@ -537,7 +542,9 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         gold = [normalize_answer(s) for s in gold]
         preds = [normalize_answer(s) for s in preds]
         if args.save_results and split == "Valid":
-            answ_results.append((preds, gold))
+            answer_preds.append(preds)
+            answer_golds.append(gold)
+            #answer_results.append((preds, gold))
         exact_match.add_batch(
             predictions=preds,
             references=gold,
@@ -551,9 +558,6 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
             references=labels,
         )
 
-        if args.save_results and split == "Valid":
-            para_results += idxes
-
         contrastive_scores = para_preds[
             torch.arange(bs)[:, None],
             eval_batch.doc_idxs,
@@ -563,6 +567,13 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
             predictions=contrastive_preds,
             references=[0] * bs,
         )
+
+        if args.save_results and split == "Valid":
+            con_preds.append(contrastive_scores)
+            con_golds.append([0] * bs)
+            con_docs.append(eval_batch.doc_idxs)
+            doc_preds.append(para_preds)
+            doc_golds.append(labels)
 
     y_exact_match = exact_match.compute()
     z_acc = prior_metric.compute()
@@ -578,7 +589,11 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         )
     if args.save_results and split == "Valid":
         torch.save(
-            (para_results, answ_results), f"logging/{args.run_name}|step-{steps}.pt"
+            (
+                con_preds, con_golds, con_docs,
+                doc_preds, doc_golds, answer_preds, answer_golds,
+            ),
+            f"logging/{args.run_name}|step-{steps}.pt"
         )
     # return z_acc["accuracy"]
     print(z_acc["accuracy"])

@@ -491,8 +491,13 @@ def evaluate(
     prior_ents = []
     pos_ents = []
     if args.save_results and split == "Valid":
-        para_results = []
-        answ_results = []
+        con_preds = []
+        con_golds = []
+        con_docs = []
+        doc_preds = []
+        doc_golds = []
+        answer_results = []
+        answer_golds = []
 
     if all_docs:
         dataloader = slow_eval_dataloader
@@ -527,12 +532,14 @@ def evaluate(
         preds = [tok.decode(out, skip_special_tokens=True) for out in eval_outs]
         gold = [normalize_answer(s) for s in gold]
         preds = [normalize_answer(s) for s in preds]
-        if args.save_results and split == "Valid":
-            answ_results.append((preds, gold))
         exact_match.add_batch(
             predictions=preds,
             references=gold,
         )
+        if args.save_results and split == "Valid":
+            #answer_results.append((preds, gold))
+            answer_preds.append(preds)
+            answer_golds.append(gold)
 
         # PRIOR Z|X
         if not all_docs:
@@ -542,6 +549,13 @@ def evaluate(
                 predictions=idxes,
                 references=[0] * bs,
             )
+
+            if args.save_results and split == "Valid":
+                con_preds.append(para_preds)
+                con_golds.append([0] * bs)
+                con_docs.append(eval_batch.doc_idxs)
+                doc_preds.append(None)
+                doc_golds.append(eval_batch.labels)
         else:
             #print("FULL")
             idxes = [s.argmax().item() for s in para_preds]
@@ -561,8 +575,12 @@ def evaluate(
                 references=[0] * bs,
             )
 
-        if args.save_results and split == "Valid":
-            para_results += idxes
+            if args.save_results and split == "Valid":
+                con_preds.append(contrastive_scores)
+                con_golds.append([0] * bs)
+                con_docs.append(eval_batch.doc_idxs)
+                doc_preds.append(para_preds)
+                doc_golds.append(labels)
 
     y_exact_match = exact_match.compute()
     z_contrastive_acc = contrastive_prior_metric.compute()
@@ -581,12 +599,17 @@ def evaluate(
 
     if args.save_results and split == "Valid":
         torch.save(
-            (para_results, answ_results), f"logging/{args.run_name}|step-{steps}.pt"
+            (
+                con_preds, con_golds, con_docs,
+                doc_preds, doc_golds, answer_preds, answer_golds,
+            ),
+            f"logging/{args.run_name}|step-{steps}.pt"
         )
 
     # return z_acc["accuracy"]
     print(z_contrastive_acc["accuracy"])
     if all_docs:
+        print("ALL DOC ACCURACY")
         print(z_acc["accuracy"])
 
     return y_exact_match["exact_match"]
