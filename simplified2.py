@@ -543,7 +543,7 @@ def evaluate(
                 references=[0] * bs,
             )
         else:
-            print("FULL")
+            #print("FULL")
             idxes = [s.argmax().item() for s in para_preds]
             labels = eval_batch.labels
             prior_metric.add_batch(
