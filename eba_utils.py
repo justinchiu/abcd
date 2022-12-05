@@ -66,6 +66,7 @@ def get_args():
     parser.add_argument("--reg_coeff", default=0, type=float)
     # parser.add_argument("--k_distractor", default=1, type=int)
     parser.add_argument("--num_distractors", default=0, type=int)
+    parser.add_argument("--num_hard_distractors", default=0, type=int)
     parser.add_argument("--max_e_len", default=3, type=int)
     parser.add_argument("--beam", default=2, type=int)
     parser.add_argument("--topk_doc", default=4, type=int)
