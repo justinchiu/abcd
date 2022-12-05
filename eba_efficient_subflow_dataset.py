@@ -194,8 +194,12 @@ def prepare_subflow_abcd(
             pickle.dump(docs_tuple, f)
         docs, answer_docs, flow_subflow = docs_tuple
 
+    with open(f"{path}/hard_negatives_k3.json", "r") as fin:
+        negatives = json.load(fin)
+
     with open(f"{path}/abcd_{split}.json", "r") as fin:
         data = json.load(fin)
+
     examples = []
     for conversation in data:
         xs = conversation["xs"]
@@ -205,6 +209,8 @@ def prepare_subflow_abcd(
         # get docs
         flow = conversation["flow"]
         subflow = conversation["subflow"]
+        subflow_negatives = negatives[subflow]
+        #import pdb; pdb.set_trace()
 
         for turn, (x, y) in enumerate(zip(xs, ys)):
             examples.append(
@@ -312,6 +318,7 @@ class SubflowAbcdDataset(torch.utils.data.Dataset):
         self.doc_labels = doc_labels
         self.answers = answers
 
+        # pre-computed sentence embeddings
         self.x_to_sent_idxs = x_to_sent_idxs
         self.enc_sents = enc_sents
         self.enc_x = enc_x

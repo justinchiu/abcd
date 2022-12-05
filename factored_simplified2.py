@@ -50,7 +50,8 @@ class DataCollatorForMultipleChoice:
     padding: Union[bool, str, PaddingStrategy] = True
     max_length: Optional[int] = None
     pad_to_multiple_of: Optional[int] = None
-    sep_idx = 2
+    sep_idx: int = 2
+    num_distractors: int = 0
 
     def __call__(self, features):
         # features[i].keys() == x, answer_x, docs, answer_docs, doc_label, answer
@@ -79,13 +80,14 @@ class DataCollatorForMultipleChoice:
         docs = [feature.pop(docs_name) for feature in features][0]
 
         doc_idxs = []
-        num_docs = len(docs)
-        for label in labels:
-            s = set(range(num_docs))
-            s.remove(label)
-            distractors = random.sample(list(s), 3)
-            z_idxs = [label] + distractors
-            doc_idxs.append(z_idxs)
+        if self.num_distractors > 0:
+            num_docs = len(docs)
+            for label in labels:
+                s = set(range(num_docs))
+                s.remove(label)
+                distractors = random.sample(list(s), self.num_distractors)
+                z_idxs = [label] + distractors
+                doc_idxs.append(z_idxs)
 
         doc_lengths = [len(x) for x in docs]
         batch_docs = self.tokenizer.pad(
@@ -214,7 +216,8 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
     )
 
     data_collator = DataCollatorForMultipleChoice(
-        tok, padding="longest", max_length=512
+        tok, padding="longest", max_length=512,
+        num_distractors = args.num_distractors,
     )
 
     train_dataloader = DataLoader(

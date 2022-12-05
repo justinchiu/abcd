@@ -19,15 +19,16 @@ val_data = load_json("eba_data/abcd_val.json")
 val_manual = load_json("eba_data/abcd_val_manual.json")
 
 # flatten manual
-docs = [
-    " ".join(sents)
+f_s_docs = [
+    (flow, subflow, " ".join(sents))
     for flow, subflow_man in val_manual.items()
     for subflow, sents in subflow_man.items()
 ]
+docs = [
+    doc for flow, subflow, doc in f_s_docs
+]
 fs = [
-    (flow, subflow)
-    for flow, subflow_man in val_manual.items()
-    for subflow, sents in subflow_man.items()
+    (flow, subflow) for flow, subflow, doc in f_s_docs
 ]
 get_index = {x: i for i, x in enumerate(fs)}
 
