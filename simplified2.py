@@ -496,7 +496,7 @@ def evaluate(
         con_docs = []
         doc_preds = []
         doc_golds = []
-        answer_results = []
+        answer_preds = []
         answer_golds = []
 
     if all_docs:

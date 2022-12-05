@@ -596,7 +596,8 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
             f"logging/{args.run_name}|step-{steps}.pt"
         )
     # return z_acc["accuracy"]
-    print(z_acc["accuracy"])
+    print("contrastive", z_contrastive_acc["accuracy"])
+    print("full", z_acc["accuracy"])
     return y_exact_match["exact_match"]
 
 
