@@ -623,7 +623,16 @@ def main():
     )
 
     model_name = args.model_dir.split("/")[-1]
-    run_name = f"fact2-model-{model_name} lr-{args.learning_rate} bs-{args.batch_size*args.gradient_accumulation_steps} k-{args.num_negatives} tp-{args.truncate_paragraph} beam-{args.beam} reg-{args.reg_coeff} topk-doc-{args.topk_doc}"
+    run_name = (
+        f"fact2-model-{model_name} "
+        f"lr-{args.learning_rate} "
+        f"bs-{args.batch_size*args.gradient_accumulation_steps} "
+        f"k-{args.num_negatives} "
+        f"tp-{args.truncate_paragraph} "
+        f"beam-{args.beam} reg-{args.reg_coeff} "
+        f"topk-doc-{args.topk_doc} "
+        f"hn-{args.num_hard_negatives}"
+    )
     args.run_name = run_name
     all_layers = prepare_model(args)
     answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)
