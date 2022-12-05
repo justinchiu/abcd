@@ -43,7 +43,6 @@ def pad_and_mask(xs):
         padded[i, :xlen] = xs[i]
     return padded, mask
 
-
 @dataclass
 class DataCollatorForMultipleChoice:
     tokenizer: PreTrainedTokenizerBase
@@ -51,7 +50,8 @@ class DataCollatorForMultipleChoice:
     max_length: Optional[int] = None
     pad_to_multiple_of: Optional[int] = None
     sep_idx: int = 2
-    num_distractors: int = 0
+    num_negatives: int = 0
+    hard_negatives: bool = False
 
     def __call__(self, features):
         # features[i].keys() == x, answer_x, docs, answer_docs, doc_label, answer
@@ -79,14 +79,20 @@ class DataCollatorForMultipleChoice:
         docs_name = "docs"
         docs = [feature.pop(docs_name) for feature in features][0]
 
+        hard_negatives = [feature.pop("doc_negatives") for feature in features]
+
         doc_idxs = []
-        if self.num_distractors > 0:
+        if self.num_negatives > 0:
             num_docs = len(docs)
-            for label in labels:
+            for i, label in enumerate(labels):
+                hns = [] if self.hard_negatives <= 0 else hard_negatives[i]
                 s = set(range(num_docs))
                 s.remove(label)
-                distractors = random.sample(list(s), self.num_distractors)
-                z_idxs = [label] + distractors
+                if self.hard_negatives > 0:
+                    for hn in hard_negatives[i]:
+                        s.remove(hn)
+                negatives = random.sample(list(s), self.num_negatives - len(hns))
+                z_idxs = [label] + negatives + hns
                 doc_idxs.append(z_idxs)
 
         doc_lengths = [len(x) for x in docs]
@@ -161,6 +167,7 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
         docs,
         adocs,
         doc_labels,
+        doc_negatives,
         answers,
         x_to_sent_idxs,
         enc_sents,
@@ -178,6 +185,7 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
         tdocs,
         tadocs,
         tdoc_labels,
+        tdoc_negatives,
         tanswers,
         tx_to_sent_idxs,
         tenc_sents,
@@ -196,6 +204,7 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
         docs,
         adocs,
         doc_labels,
+        doc_negatives,
         answers,
         x_to_sent_idxs,
         enc_sents,
@@ -208,6 +217,7 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
         tdocs,
         tadocs,
         tdoc_labels,
+        tdoc_negatives,
         tanswers,
         tx_to_sent_idxs,
         tenc_sents,
@@ -217,7 +227,8 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
 
     data_collator = DataCollatorForMultipleChoice(
         tok, padding="longest", max_length=512,
-        num_distractors = args.num_distractors,
+        num_negatives = args.num_negatives,
+        hard_negatives = args.num_hard_negatives,
     )
 
     train_dataloader = DataLoader(
@@ -612,7 +623,7 @@ def main():
     )
 
     model_name = args.model_dir.split("/")[-1]
-    run_name = f"fact2-model-{model_name} lr-{args.learning_rate} bs-{args.batch_size*args.gradient_accumulation_steps} k-{args.num_distractors} tp-{args.truncate_paragraph} beam-{args.beam} reg-{args.reg_coeff} topk-doc-{args.topk_doc}"
+    run_name = f"fact2-model-{model_name} lr-{args.learning_rate} bs-{args.batch_size*args.gradient_accumulation_steps} k-{args.num_negatives} tp-{args.truncate_paragraph} beam-{args.beam} reg-{args.reg_coeff} topk-doc-{args.topk_doc}"
     args.run_name = run_name
     all_layers = prepare_model(args)
     answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)

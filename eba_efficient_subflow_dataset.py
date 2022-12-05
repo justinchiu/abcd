@@ -25,10 +25,12 @@ def preprocess_subflow_abcd_docs(split, tok, answ_tok, sep_token="</s>"):
         docs = json.load(f)
 
         flow_subflow_to_idx = {}
+        subflow_to_idx = {}
         subflows = []
         for flow, subflow_doc in docs.items():
             for subflow, sentences in subflow_doc.items():
                 flow_subflow_to_idx[(flow, subflow)] = len(subflows)
+                subflow_to_idx[subflow] = len(subflows)
                 # subflow = f" {sep_token} ".join(sentences)
                 subflow = " ".join(sentences)
                 subflows.append(subflow)
@@ -47,10 +49,13 @@ def preprocess_subflow_abcd_docs(split, tok, answ_tok, sep_token="</s>"):
             add_special_tokens=False,
         )["input_ids"]
 
-        return tokenized_subflows, answer_tokenized_subflows, flow_subflow_to_idx
+        return (
+            tokenized_subflows, answer_tokenized_subflows,
+            flow_subflow_to_idx, subflow_to_idx
+        )
 
 
-def preprocess_subflow_abcd(examples, tok, answ_tok, flow_subflow, sep=" "):
+def preprocess_subflow_abcd(examples, tok, answ_tok, subflow_map, sep=" "):
     maxlen = tok.max_len_single_sentence
     xs = [e["x"] for e in examples]
     tokenized_x = tok(xs, truncation=True, return_attention_mask=False)["input_ids"]
@@ -66,12 +71,16 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, flow_subflow, sep=" "):
         "input_ids"
     ]
 
-    num_docs = len(flow_subflow)
+    num_docs = len(subflow_map)
 
-    doc_labels = [flow_subflow[(e["flow"], e["subflow"])] for e in examples]
+    doc_labels = [subflow_map[e["subflow"]] for e in examples]
+    doc_negatives = [
+        [subflow_map[s] for s in e["subflow_negatives"]]
+        for e in examples
+    ]
 
     assert len(tokenized_x) == len(answer_tokenized_x) == len(tokenized_y)
-    return tokenized_x, answer_tokenized_x, doc_labels, tokenized_y
+    return tokenized_x, answer_tokenized_x, doc_labels, doc_negatives, tokenized_y
 
 
 def preprocess_sents_abcd(data, tokenizer):
@@ -187,12 +196,12 @@ def prepare_subflow_abcd(
     fname = f"cache/abcd_efficient_subflow_manual_tok_{split}.pkl"
     if os.path.isfile(fname):
         with open(fname, "rb") as f:
-            docs, answer_docs, flow_subflow = pickle.load(f)
+            docs, answer_docs, flow_subflow_map, subflow_map = pickle.load(f)
     else:
         docs_tuple = preprocess_subflow_abcd_docs(split, tokenizer, answer_tokenizer)
         with open(fname, "wb") as f:
             pickle.dump(docs_tuple, f)
-        docs, answer_docs, flow_subflow = docs_tuple
+        docs, answer_docs, flow_subflow_map, subflow_map = docs_tuple
 
     with open(f"{path}/hard_negatives_k3.json", "r") as fin:
         negatives = json.load(fin)
@@ -221,22 +230,23 @@ def prepare_subflow_abcd(
                     "subflow": subflow,
                     "id": id,
                     "turn": turn,
+                    "subflow_negatives": subflow_negatives,
                 }
             )
 
     fname = f"cache/abcd_efficient_tok_{split}.pkl"
     if os.path.isfile(fname):
         with open(fname, "rb") as f:
-            x, answer_x, doc_labels, y = pickle.load(f)
+            x, answer_x, doc_labels, doc_negatives, y = pickle.load(f)
     else:
-        x, answer_x, doc_labels, y = preprocess_subflow_abcd(
+        x, answer_x, doc_labels, doc_negatives, y = preprocess_subflow_abcd(
             examples,
             tokenizer,
             answer_tokenizer,
-            flow_subflow,
+            subflow_map,
         )
         with open(fname, "wb") as f:
-            pickle.dump((x, answer_x, doc_labels, y), f)
+            pickle.dump((x, answer_x, doc_labels, doc_negatives, y), f)
     # docs[0] = tokenized documents (not answer-tokenized)
 
     # map x to sent idxs for efficient encoding
@@ -289,6 +299,7 @@ def prepare_subflow_abcd(
         docs,
         answer_docs,
         doc_labels,
+        doc_negatives,
         y,
         x_to_sent_idxs,
         enc_sents,
@@ -305,6 +316,7 @@ class SubflowAbcdDataset(torch.utils.data.Dataset):
         docs,
         answer_docs,
         doc_labels,
+        doc_negatives,
         answers,
         x_to_sent_idxs,
         enc_sents,
@@ -316,6 +328,7 @@ class SubflowAbcdDataset(torch.utils.data.Dataset):
         self.docs = docs
         self.answer_docs = answer_docs
         self.doc_labels = doc_labels
+        self.doc_negatives = doc_negatives
         self.answers = answers
 
         # pre-computed sentence embeddings
@@ -331,6 +344,7 @@ class SubflowAbcdDataset(torch.utils.data.Dataset):
         item["docs"] = self.docs
         item["answer_docs"] = self.answer_docs
         item["doc_label"] = self.doc_labels[idx]
+        item["doc_negatives"] = self.doc_negatives[idx]
         item["answer"] = self.answers[idx]
 
         item["enc_x"] = self.enc_x[idx]
