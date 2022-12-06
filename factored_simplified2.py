@@ -177,7 +177,11 @@ class DataCollatorForMultipleChoice:
 
 
 def prepare_model(args):
-    model = AutoModel.from_pretrained(args.model_dir)
+    # DELETE AFTER DBG
+    model_dir = "saved_models/fact2-model-roberta-large lr-2e-05 bs-1 k-7 tp-0 beam-2 reg-0 topk-doc-8 hn-3"
+    #model_dir = args.model_dir
+    model = AutoModel.from_pretrained(model_dir)
+    #model = AutoModel.from_pretrained(args.model_dir)
     model = model.to(device)
     linear = prepare_linear(model.config.hidden_size)
     return [model, linear]
@@ -315,6 +319,7 @@ def run_lm(
             input_ids=z.view(bsz * ndocs, -1),
             attention_mask=z_attention_mask.view(bsz * ndocs, -1),
         )
+
     z_pooled_output = (
         z_outputs[1].view(bsz, ndocs, 1024)
         if train
@@ -494,6 +499,8 @@ def run_model(
         z_outputs=z_outputs,
         use_first_sentence=use_first_sentence,
     )
+    #print(p_z.softmax(-1))
+    #import pdb; pdb.set_trace()
     if train:
         z_size = batch.doc_idxs.shape[1]
         answer_in, answer_attn, labels, labels_mask = pad_answers(
@@ -533,8 +540,10 @@ def run_model(
             bs, num_z, -1
         )
         tok_loss[~labels_mask.view(bs, num_z, -1)] = 0
-        loss_raw = -(tok_loss.sum(-1) + p_z).logsumexp(-1)
         loss = -(tok_loss.sum(-1) + p_z).logsumexp(-1).mean()
+
+        #print(p_z)
+        #print(tok_loss.sum(-1))
 
         """
         # this one collapses over time but not batch
@@ -596,22 +605,24 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         answer_golds = []
 
     z_outputs = None
+    #z_outputs = True # DBG remove
     # run evaluation
-    # for step, eval_batch in enumerate(dataloader):
-    for step, eval_batch in track(enumerate(dataloader), total=len(dataloader)):
+    for step, eval_batch in enumerate(dataloader):
+    #for step, eval_batch in track(enumerate(dataloader), total=len(dataloader)):
         bs = len(eval_batch.answers)
         n_docs = len(eval_batch.docs)
 
+        #if False and z_outputs is None:
         if z_outputs is None:
             # precompute z_outputs
             z = (
                 eval_batch.doc_input_ids
-                if args.use_first_sentence
+                if not args.use_first_sentence
                 else eval_batch.doc_first_sentence_input_ids
             ).to(device)
             z_attention_mask = (
                 eval_batch.doc_attention_mask
-                if args.use_first_sentence
+                if not args.use_first_sentence
                 else eval_batch.doc_first_sentence_attention_mask
             ).to(device)
 
@@ -619,6 +630,7 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
                 input_ids=z,
                 attention_mask=z_attention_mask,
             )
+            import pdb; pdb.set_trace()
 
         # ANSWER EVAL Y|X
         gold = answ_tok.batch_decode(eval_batch.answers, skip_special_tokens=True)
@@ -662,7 +674,7 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         )
 
         # we dont want the label to be 0
-        contrastive_label = eval_batch.doc_idxs.shape[1]
+        contrastive_label = eval_batch.doc_idxs.shape[1]-1
         contrastive_scores = para_preds[
             torch.arange(bs)[:, None],
             eval_batch.doc_idxs,
@@ -732,7 +744,14 @@ def main():
     )
     args.run_name = run_name
     all_layers = prepare_model(args)
-    answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)
+    #answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)
+
+    load_answer = False
+    # DELETE LINE BELOW AFTER DBG
+    load_answer = "saved_models/fact2-model-roberta-large lr-2e-05 bs-1 k-7 tp-0 beam-2 reg-0 topk-doc-8 hn-3-answer"
+    answer_model_dir = args.answer_model_dir if not load_answer else load_answer
+
+    answer_model = AutoModelForSeq2SeqLM.from_pretrained(answer_model_dir)
     answer_model = answer_model.to(device)
 
     train_dataloader, eval_dataloader = prepare_dataloader(
