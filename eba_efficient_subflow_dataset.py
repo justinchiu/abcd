@@ -27,6 +27,7 @@ def preprocess_subflow_abcd_docs(split, tok, answ_tok, sep_token="</s>"):
         flow_subflow_to_idx = {}
         subflow_to_idx = {}
         subflows = []
+        subflow_first_sentences = []
         for flow, subflow_doc in docs.items():
             for subflow, sentences in subflow_doc.items():
                 flow_subflow_to_idx[(flow, subflow)] = len(subflows)
@@ -34,6 +35,7 @@ def preprocess_subflow_abcd_docs(split, tok, answ_tok, sep_token="</s>"):
                 # subflow = f" {sep_token} ".join(sentences)
                 subflow = " ".join(sentences)
                 subflows.append(subflow)
+                subflow_first_sentences.append(sentences[0])
 
         # different tokenizers for document choice and answer choice
         tokenized_subflows = tok(
@@ -49,9 +51,26 @@ def preprocess_subflow_abcd_docs(split, tok, answ_tok, sep_token="</s>"):
             add_special_tokens=False,
         )["input_ids"]
 
+        tokenized_subflow_first_sentences = tok(
+            subflow_first_sentences,
+            truncation=True,
+            return_attention_mask=False,
+            add_special_tokens=False,
+        )["input_ids"]
+        answer_tokenized_subflow_first_sentences = tok(
+            subflow_first_sentences,
+            truncation=True,
+            return_attention_mask=False,
+            add_special_tokens=False,
+        )["input_ids"]
+
         return (
-            tokenized_subflows, answer_tokenized_subflows,
-            flow_subflow_to_idx, subflow_to_idx
+            tokenized_subflows,
+            answer_tokenized_subflows,
+            tokenized_subflow_first_sentences,
+            answer_tokenized_subflow_first_sentences,
+            flow_subflow_to_idx,
+            subflow_to_idx,
         )
 
 
@@ -74,10 +93,7 @@ def preprocess_subflow_abcd(examples, tok, answ_tok, subflow_map, sep=" "):
     num_docs = len(subflow_map)
 
     doc_labels = [subflow_map[e["subflow"]] for e in examples]
-    doc_negatives = [
-        [subflow_map[s] for s in e["subflow_negatives"]]
-        for e in examples
-    ]
+    doc_negatives = [[subflow_map[s] for s in e["subflow_negatives"]] for e in examples]
 
     assert len(tokenized_x) == len(answer_tokenized_x) == len(tokenized_y)
     return tokenized_x, answer_tokenized_x, doc_labels, doc_negatives, tokenized_y
@@ -196,12 +212,26 @@ def prepare_subflow_abcd(
     fname = f"cache/abcd_efficient_subflow_manual_tok_{split}.pkl"
     if os.path.isfile(fname):
         with open(fname, "rb") as f:
-            docs, answer_docs, flow_subflow_map, subflow_map = pickle.load(f)
+            (
+                docs,
+                answer_docs,
+                doc_first_sentences,
+                answer_doc_first_sentences,
+                flow_subflow_map,
+                subflow_map,
+            ) = pickle.load(f)
     else:
         docs_tuple = preprocess_subflow_abcd_docs(split, tokenizer, answer_tokenizer)
         with open(fname, "wb") as f:
             pickle.dump(docs_tuple, f)
-        docs, answer_docs, flow_subflow_map, subflow_map = docs_tuple
+        (
+            docs,
+            answer_docs,
+            doc_first_sentences,
+            answer_doc_first_sentences,
+            flow_subflow_map,
+            subflow_map,
+        ) = docs_tuple
 
     with open(f"{path}/hard_negatives_k3.json", "r") as fin:
         negatives = json.load(fin)
@@ -219,7 +249,7 @@ def prepare_subflow_abcd(
         flow = conversation["flow"]
         subflow = conversation["subflow"]
         subflow_negatives = negatives[subflow]
-        #import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
 
         for turn, (x, y) in enumerate(zip(xs, ys)):
             examples.append(
@@ -262,6 +292,7 @@ def prepare_subflow_abcd(
         with open(fname, "wb") as f:
             pickle.dump((x_to_sent_idxs, sents), f)
 
+    """
     # pre-encode everything with roberta
     fname = f"cache/abcd_efficient_enc_sents_{split}.pkl"
     if os.path.isfile(fname):
@@ -292,12 +323,16 @@ def prepare_subflow_abcd(
             enc_docs = encode_docs_abcd(docs, tokenizer, encoder)
             with open(fname, "wb") as f:
                 pickle.dump(enc_docs, f)
+    """
+    enc_sents, enc_x, enc_docs = None, None, None
 
     return (
         x,
         answer_x,
         docs,
         answer_docs,
+        doc_first_sentences,
+        answer_doc_first_sentences,
         doc_labels,
         doc_negatives,
         y,
@@ -315,6 +350,8 @@ class SubflowAbcdDataset(torch.utils.data.Dataset):
         answer_x,
         docs,
         answer_docs,
+        doc_first_sentences,
+        answer_doc_first_sentences,
         doc_labels,
         doc_negatives,
         answers,
@@ -327,6 +364,8 @@ class SubflowAbcdDataset(torch.utils.data.Dataset):
         self.answer_x = answer_x
         self.docs = docs
         self.answer_docs = answer_docs
+        self.doc_first_sentences = doc_first_sentences
+        self.answer_doc_first_sentences = answer_doc_first_sentences
         self.doc_labels = doc_labels
         self.doc_negatives = doc_negatives
         self.answers = answers
@@ -341,20 +380,27 @@ class SubflowAbcdDataset(torch.utils.data.Dataset):
         item = dict()
         item["x"] = self.x[idx]
         item["answer_x"] = self.answer_x[idx]
+
         item["docs"] = self.docs
         item["answer_docs"] = self.answer_docs
+
+        item["doc_first_sentences"] = self.doc_first_sentences
+        item["answer_doc_first_sentences"] = self.answer_doc_first_sentences
+
         item["doc_label"] = self.doc_labels[idx]
         item["doc_negatives"] = self.doc_negatives[idx]
+
         item["answer"] = self.answers[idx]
 
-        item["enc_x"] = self.enc_x[idx]
-        item["enc_docs"] = self.enc_docs
+        if self.enc_x is not None:
+            item["enc_x"] = self.enc_x[idx]
+            item["enc_docs"] = self.enc_docs
 
-        item["sent_idxs"] = self.x_to_sent_idxs[idx]
-        item["enc_sents"] = np.concatenate(
-            [self.enc_sents[i][None] for i in self.x_to_sent_idxs[idx]],
-            0,
-        )
+            item["sent_idxs"] = self.x_to_sent_idxs[idx]
+            item["enc_sents"] = np.concatenate(
+                [self.enc_sents[i][None] for i in self.x_to_sent_idxs[idx]],
+                0,
+            )
 
         return item
 

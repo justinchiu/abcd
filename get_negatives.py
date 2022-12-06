@@ -12,6 +12,7 @@ def load_json(path):
     with Path(path).open("r") as f:
         return json.load(f)
 
+
 def save_json(x, path):
     with Path(path).open("w") as f:
         return json.dump(x, f)
@@ -28,12 +29,8 @@ f_s_docs = [
     for flow, subflow_man in val_manual.items()
     for subflow, sents in subflow_man.items()
 ]
-docs = [
-    doc for flow, subflow, doc in f_s_docs
-]
-fs = [
-    (flow, subflow) for flow, subflow, doc in f_s_docs
-]
+docs = [doc for flow, subflow, doc in f_s_docs]
+fs = [(flow, subflow) for flow, subflow, doc in f_s_docs]
 get_index = {x: i for i, x in enumerate(fs)}
 
 # build index
@@ -45,7 +42,7 @@ for k in [3, 7, 11]:
     for i, (flow, subflow, doc) in enumerate(f_s_docs):
         tokenized_query = doc.split()
         scores = bm25.get_scores(tokenized_query)
-        topk = set(np.argpartition(-scores, k+1)[:k+1])
+        topk = set(np.argpartition(-scores, k + 1)[: k + 1])
         negatives[subflow] = [fs[x][1] for x in topk - {i}]
 
     save_json(negatives, f"eba_data/hard_negatives_k{k}.json")

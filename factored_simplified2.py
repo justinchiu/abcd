@@ -43,6 +43,7 @@ def pad_and_mask(xs):
         padded[i, :xlen] = xs[i]
     return padded, mask
 
+
 @dataclass
 class DataCollatorForMultipleChoice:
     tokenizer: PreTrainedTokenizerBase
@@ -74,10 +75,16 @@ class DataCollatorForMultipleChoice:
         raw_answers = [feature.pop(answer_name) for feature in features]
         answer_docs_name = "answer_docs"
         answer_docs = [feature.pop(answer_docs_name) for feature in features][0]
+
         labels_name = "doc_label"
         labels = [feature.pop(labels_name) for feature in features]
+
         docs_name = "docs"
         docs = [feature.pop(docs_name) for feature in features][0]
+
+        doc_first_sentences = [
+            feature.pop("doc_first_sentences") for feature in features
+        ][0]
 
         hard_negatives = [feature.pop("doc_negatives") for feature in features]
 
@@ -98,6 +105,13 @@ class DataCollatorForMultipleChoice:
         doc_lengths = [len(x) for x in docs]
         batch_docs = self.tokenizer.pad(
             [{"input_ids": x} for x in docs],
+            padding=self.padding,
+            max_length=self.max_length,
+            pad_to_multiple_of=self.pad_to_multiple_of,
+            return_tensors="pt",
+        )
+        batch_doc_first_sentence = self.tokenizer.pad(
+            [{"input_ids": x} for x in doc_first_sentences],
             padding=self.padding,
             max_length=self.max_length,
             pad_to_multiple_of=self.pad_to_multiple_of,
@@ -124,11 +138,18 @@ class DataCollatorForMultipleChoice:
 
         batch["docs"] = docs
         batch["doc_lengths"] = doc_lengths
+        batch["doc_first_sentences"] = doc_first_sentences
         batch["doc_idxs"] = torch.tensor(doc_idxs, dtype=torch.long)
 
         batch["doc_input_ids"] = batch_docs.input_ids
         batch["doc_attention_mask"] = batch_docs.attention_mask
 
+        batch["doc_first_sentence_input_ids"] = batch_doc_first_sentence.input_ids
+        batch[
+            "doc_first_sentence_attention_mask"
+        ] = batch_doc_first_sentence.attention_mask
+
+        """
         # encoded inputs
         enc_x = [feature.pop("enc_x") for feature in features]
         enc_sents = [feature.pop("enc_sents") for feature in features]
@@ -149,6 +170,7 @@ class DataCollatorForMultipleChoice:
         # raw x and docs to concat for answer later
         batch["enc_x"] = enc_x
         batch["enc_docs"] = enc_docs
+        """
 
         return batch
 
@@ -166,6 +188,8 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
         ax,
         docs,
         adocs,
+        doc_first_sentences,
+        adoc_first_sentences,
         doc_labels,
         doc_negatives,
         answers,
@@ -184,6 +208,8 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
         tax,
         tdocs,
         tadocs,
+        tdoc_first_sentences,
+        tadoc_first_sentences,
         tdoc_labels,
         tdoc_negatives,
         tanswers,
@@ -199,36 +225,42 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
     )
 
     train_dataset = SubflowAbcdDataset(
-        x,
-        ax,
-        docs,
-        adocs,
-        doc_labels,
-        doc_negatives,
-        answers,
-        x_to_sent_idxs,
-        enc_sents,
-        enc_x,
-        enc_docs,
+        x=x,
+        answer_x=ax,
+        docs=docs,
+        answer_docs=adocs,
+        doc_first_sentences=doc_first_sentences,
+        answer_doc_first_sentences=adoc_first_sentences,
+        doc_labels=doc_labels,
+        doc_negatives=doc_negatives,
+        answers=answers,
+        x_to_sent_idxs=x_to_sent_idxs,
+        enc_sents=enc_sents,
+        enc_x=enc_x,
+        enc_docs=enc_docs,
     )
     eval_dataset = SubflowAbcdDataset(
-        tx,
-        tax,
-        tdocs,
-        tadocs,
-        tdoc_labels,
-        tdoc_negatives,
-        tanswers,
-        tx_to_sent_idxs,
-        tenc_sents,
-        tenc_x,
-        tenc_docs,
+        x=tx,
+        answer_x=tax,
+        docs=tdocs,
+        answer_docs=tadocs,
+        doc_first_sentences=tdoc_first_sentences,
+        answer_doc_first_sentences=tadoc_first_sentences,
+        doc_labels=tdoc_labels,
+        doc_negatives=tdoc_negatives,
+        answers=tanswers,
+        x_to_sent_idxs=tx_to_sent_idxs,
+        enc_sents=tenc_sents,
+        enc_x=tenc_x,
+        enc_docs=tenc_docs,
     )
 
     data_collator = DataCollatorForMultipleChoice(
-        tok, padding="longest", max_length=512,
-        num_negatives = args.num_negatives,
-        hard_negatives = args.num_hard_negatives,
+        tok,
+        padding="longest",
+        max_length=512,
+        num_negatives=args.num_negatives,
+        hard_negatives=args.num_hard_negatives,
     )
 
     train_dataloader = DataLoader(
@@ -247,15 +279,26 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
     return train_dataloader, eval_dataloader
 
 
-def run_lm(model, batch, bs, train=True, z_outputs=None):
+def run_lm(
+    model,
+    batch,
+    bs,
+    train=True,
+    z_outputs=None,
+    use_first_sentence=False,
+):
     model, linear = model
 
     x = batch["input_ids"]
     x_attention_mask = batch["attention_mask"]
 
     # contrastive
-    z = batch.doc_input_ids[batch.doc_idxs]
-    z_attention_mask = batch.doc_attention_mask[batch.doc_idxs]
+    if use_first_sentence:
+        z = batch.doc_first_sentence_input_ids[batch.doc_idxs]
+        z_attention_mask = batch.doc_first_sentence_attention_mask[batch.doc_idxs]
+    else:
+        z = batch.doc_input_ids[batch.doc_idxs]
+        z_attention_mask = batch.doc_attention_mask[batch.doc_idxs]
 
     bsz = x.shape[0]
     ndocs = z.shape[1] if train else 55
@@ -420,6 +463,7 @@ def run_model(
     train=True,
     num_z=4,
     z_outputs=None,
+    use_first_sentence=False,
 ):
     for key in batch:
         # if key == "input_ids" or key == "attention_mask":
@@ -429,6 +473,8 @@ def run_model(
             "doc_idxs",
             "doc_input_ids",
             "doc_attention_mask",
+            "doc_first_sentence_input_ids",
+            "doc_first_sentence_attention_mask",
             "enc_x_emb",
             "enc_x_mask",
             "enc_docs_emb",
@@ -439,13 +485,28 @@ def run_model(
             # doc_input_ids, doc_attention_mask should be cached
             batch[key] = batch[key].to(device)
     bs = len(batch.answers)
-    z_size = len(batch.docs)
-    p_z, z_outputs = run_lm(layers, batch, bs, train=train, z_outputs=z_outputs)
+    p_z, z_outputs = run_lm(
+        layers,
+        batch,
+        bs,
+        train=train,
+        z_outputs=z_outputs,
+        use_first_sentence=use_first_sentence,
+    )
     if train:
+        z_size = batch.doc_idxs.shape[1]
         answer_in, answer_attn, labels, labels_mask = pad_answers(
             answer_tokenizer,
             batch.raw_xs,
-            [[batch.docs[i] for i in doc_idxs] for doc_idxs in batch.doc_idxs],
+            [
+                [
+                    batch.docs[i]
+                    if not use_first_sentence
+                    else batch.doc_first_sentences[i]
+                    for i in doc_idxs
+                ]
+                for doc_idxs in batch.doc_idxs
+            ],
             batch["answers"],
         )
         # top_z = p_z.topk(num_z, -1)
@@ -467,14 +528,32 @@ def run_model(
         logits = answ_out.logits.log_softmax(-1)
         # ASSUME N = total num documents during training
         N, T, V = logits.shape
-        loss = logits[torch.arange(N)[:, None], torch.arange(T), labels].view(
+        tok_loss = logits[torch.arange(N)[:, None], torch.arange(T), labels].view(
             bs, num_z, -1
         )
-        loss[~labels_mask.view(bs, num_z, -1)] = 0
-        loss = -(loss.sum(-1) + p_z).logsumexp(-1).mean()
+        tok_loss[~labels_mask.view(bs, num_z, -1)] = 0
+        loss_raw = -(tok_loss.sum(-1) + p_z).logsumexp(-1)
+        loss = -(tok_loss.sum(-1) + p_z).logsumexp(-1).mean()
+
+        """
+        # this one collapses over time but not batch
+        #dbg_loss_fn = nn.CrossEntropyLoss(reduce=False)
+        dbg_loss_fn = nn.CrossEntropyLoss(reduction="none")
+        dbg_tok_loss = dbg_loss_fn(
+            answ_out.logits.view(-1, answer_model.config.vocab_size),
+            labels.view(-1),
+        ).view(bs, z_size, T)
+        dbg_loss = (-dbg_tok_loss).sum(dim=-1)
+        dbg_loss += p_z
+        dbg_loss = torch.logsumexp(dbg_loss, dim=-1)
+        dbg_loss_mean = -dbg_loss.mean()
+
+        import pdb; pdb.set_trace()
+        """
     else:
         # pick out argmax contexts
         # assuming pouts: bs * z_size
+        z_size = len(batch.docs)
         assert z_size == 55
         idxs = p_z.view(bs, z_size).argmax(-1).view(-1, 1)
         answer_in, answer_attn, labels, labels_mask = pad_answers(
@@ -524,8 +603,16 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
 
         if z_outputs is None:
             # precompute z_outputs
-            z = eval_batch.doc_input_ids.to(device)
-            z_attention_mask = eval_batch.doc_attention_mask.to(device)
+            z = (
+                eval_batch.doc_input_ids
+                if args.use_first_sentence
+                else eval_batch.doc_first_sentence_input_ids
+            ).to(device)
+            z_attention_mask = (
+                eval_batch.doc_attention_mask
+                if args.use_first_sentence
+                else eval_batch.doc_first_sentence_attention_mask
+            ).to(device)
 
             z_outputs = layers[0](
                 input_ids=z,
@@ -547,6 +634,7 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
             train=False,
             beam=args.beam,
             z_outputs=z_outputs,
+            use_first_sentence=args.use_first_sentence
         )
 
         eval_outs, scores = eval_outs
@@ -558,7 +646,7 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         if args.save_results and split == "Valid":
             answer_preds.append(preds)
             answer_golds.append(gold)
-            #answer_results.append((preds, gold))
+            # answer_results.append((preds, gold))
         exact_match.add_batch(
             predictions=preds,
             references=gold,
@@ -604,10 +692,15 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
     if args.save_results and split == "Valid":
         torch.save(
             (
-                con_preds, con_golds, con_docs,
-                doc_preds, doc_golds, answer_preds, answer_golds,
+                con_preds,
+                con_golds,
+                con_docs,
+                doc_preds,
+                doc_golds,
+                answer_preds,
+                answer_golds,
             ),
-            f"logging/{args.run_name}|step-{steps}.pt"
+            f"logging/{args.run_name}|step-{steps}.pt",
         )
     # return z_acc["accuracy"]
     print("contrastive", z_contrastive_acc["accuracy"])
@@ -631,7 +724,8 @@ def main():
         f"tp-{args.truncate_paragraph} "
         f"beam-{args.beam} reg-{args.reg_coeff} "
         f"topk-doc-{args.topk_doc} "
-        f"hn-{args.num_hard_negatives}"
+        f"hn-{args.num_hard_negatives} "
+        f"fs-{args.use_first_sentence} "
     )
     args.run_name = run_name
     all_layers = prepare_model(args)
@@ -687,9 +781,16 @@ def main():
                 if valid_acc > best_valid:
                     best_valid = valid_acc
                     if args.save_model:
-                        all_layers[0].save_pretrained(f"{args.output_model_dir}/{run_name}")
-                        torch.save(all_layers[1:], f"{args.output_model_dir}/{run_name}-others.pt")
-                        answer_model.save_pretrained(f"{args.output_model_dir}/{run_name}-answer")
+                        all_layers[0].save_pretrained(
+                            f"{args.output_model_dir}/{run_name}"
+                        )
+                        torch.save(
+                            all_layers[1:],
+                            f"{args.output_model_dir}/{run_name}-others.pt",
+                        )
+                        answer_model.save_pretrained(
+                            f"{args.output_model_dir}/{run_name}-answer"
+                        )
                 all_layers[0].train()
                 answer_model.train()
             _, _, loss, _ = run_model(
@@ -702,6 +803,7 @@ def main():
                 t=args.sentence_threshold,
                 max_p=args.max_p,
                 num_z=args.topk_doc,
+                use_first_sentence=args.use_first_sentence,
             )
             loss.backward()
             if (

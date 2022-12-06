@@ -59,6 +59,7 @@ def get_args():
     parser.add_argument("--baseline", action="store_true")
     parser.add_argument("--save_model", action="store_true")
     parser.add_argument("--save_results", action="store_true")
+    parser.add_argument("--use_first_sentence", action="store_true")
     parser.add_argument("--max_p", action="store_true")
     parser.add_argument("--sentence", action="store_true")
     parser.add_argument("--gradient_checkpoint", "-gc", action="store_true")

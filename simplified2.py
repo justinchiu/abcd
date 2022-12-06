@@ -503,7 +503,7 @@ def evaluate(
         dataloader = slow_eval_dataloader
 
     # run evaluation
-    #for step, eval_batch in enumerate(dataloader):
+    # for step, eval_batch in enumerate(dataloader):
     for step, eval_batch in track(enumerate(dataloader), total=len(dataloader)):
         bs = len(eval_batch.answers)
         n_docs = len(eval_batch.docs)
@@ -537,7 +537,7 @@ def evaluate(
             references=gold,
         )
         if args.save_results and split == "Valid":
-            #answer_results.append((preds, gold))
+            # answer_results.append((preds, gold))
             answer_preds.append(preds)
             answer_golds.append(gold)
 
@@ -557,7 +557,7 @@ def evaluate(
                 doc_preds.append(None)
                 doc_golds.append(eval_batch.labels)
         else:
-            #print("FULL")
+            # print("FULL")
             idxes = [s.argmax().item() for s in para_preds]
             labels = eval_batch.labels
             prior_metric.add_batch(
@@ -600,10 +600,15 @@ def evaluate(
     if args.save_results and split == "Valid":
         torch.save(
             (
-                con_preds, con_golds, con_docs,
-                doc_preds, doc_golds, answer_preds, answer_golds,
+                con_preds,
+                con_golds,
+                con_docs,
+                doc_preds,
+                doc_golds,
+                answer_preds,
+                answer_golds,
             ),
-            f"logging/{args.run_name}|step-{steps}.pt"
+            f"logging/{args.run_name}|step-{steps}.pt",
         )
 
     # return z_acc["accuracy"]
@@ -680,9 +685,16 @@ def main():
                 if valid_acc > best_valid:
                     best_valid = valid_acc
                     if args.save_model:
-                        all_layers[0].save_pretrained(f"{args.output_model_dir}/{run_name}")
-                        torch.save(all_layers[1:], f"{args.output_model_dir}/{run_name}-others.pt")
-                        answer_model.save_pretrained(f"{args.output_model_dir}/{run_name}-answer")
+                        all_layers[0].save_pretrained(
+                            f"{args.output_model_dir}/{run_name}"
+                        )
+                        torch.save(
+                            all_layers[1:],
+                            f"{args.output_model_dir}/{run_name}-others.pt",
+                        )
+                        answer_model.save_pretrained(
+                            f"{args.output_model_dir}/{run_name}-answer"
+                        )
                 all_layers[0].train()
                 answer_model.train()
             _, _, loss, _ = run_model(

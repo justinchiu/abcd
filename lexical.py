@@ -24,12 +24,8 @@ f_s_docs = [
     for flow, subflow_man in val_manual.items()
     for subflow, sents in subflow_man.items()
 ]
-docs = [
-    doc for flow, subflow, doc in f_s_docs
-]
-fs = [
-    (flow, subflow) for flow, subflow, doc in f_s_docs
-]
+docs = [doc for flow, subflow, doc in f_s_docs]
+fs = [(flow, subflow) for flow, subflow, doc in f_s_docs]
 get_index = {x: i for i, x in enumerate(fs)}
 
 # build index
