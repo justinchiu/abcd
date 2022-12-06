@@ -99,7 +99,8 @@ class DataCollatorForMultipleChoice:
                     for hn in hard_negatives[i]:
                         s.remove(hn)
                 negatives = random.sample(list(s), self.num_negatives - len(hns))
-                z_idxs = [label] + negatives + hns
+                # we want the last one to be the label so ties don't count.
+                z_idxs = negatives + hns + [label]
                 doc_idxs.append(z_idxs)
 
         doc_lengths = [len(x) for x in docs]
@@ -660,6 +661,8 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
             references=labels,
         )
 
+        # we dont want the label to be 0
+        contrastive_label = eval_batch.doc_idxs.shape[1]
         contrastive_scores = para_preds[
             torch.arange(bs)[:, None],
             eval_batch.doc_idxs,
@@ -667,12 +670,12 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
         contrastive_preds = contrastive_scores.argmax(-1)
         contrastive_prior_metric.add_batch(
             predictions=contrastive_preds,
-            references=[0] * bs,
+            references=[contrastive_label] * bs,
         )
 
         if args.save_results and split == "Valid":
             con_preds.append(contrastive_scores)
-            con_golds.append([0] * bs)
+            con_golds.append([contrastive_label] * bs)
             con_docs.append(eval_batch.doc_idxs)
             doc_preds.append(para_preds)
             doc_golds.append(labels)
