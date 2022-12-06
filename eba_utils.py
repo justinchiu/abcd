@@ -59,16 +59,19 @@ def get_args():
     parser.add_argument("--baseline", action="store_true")
     parser.add_argument("--save_model", action="store_true")
     parser.add_argument("--save_results", action="store_true")
+    parser.add_argument("--use_first_sentence", action="store_true")
     parser.add_argument("--max_p", action="store_true")
     parser.add_argument("--sentence", action="store_true")
     parser.add_argument("--gradient_checkpoint", "-gc", action="store_true")
     parser.add_argument("--truncate_paragraph", "-tp", default=0, type=int)
     parser.add_argument("--reg_coeff", default=0, type=float)
-    parser.add_argument("--k_distractor", default=1, type=int)
+    # parser.add_argument("--k_distractor", default=1, type=int)
+    parser.add_argument("--num_negatives", default=0, type=int)
+    parser.add_argument("--num_hard_negatives", default=0, type=int)
     parser.add_argument("--max_e_len", default=3, type=int)
     parser.add_argument("--beam", default=2, type=int)
-    parser.add_argument("--topkp", default=5, type=int)
-    parser.add_argument("--topks", default=5, type=int)
+    parser.add_argument("--topk_doc", default=4, type=int)
+    parser.add_argument("--topk_sent", default=4, type=int)
     parser.add_argument("--mode", default="topk", type=str)
     parser.add_argument(
         "--batch_size", "-b", default=1, type=int, help="batch size per gpu."
@@ -81,6 +84,12 @@ def get_args():
         default=5000,
         type=int,
         help="number of steps between each evaluation.",
+    )
+    parser.add_argument(
+        "--full_eval_steps",
+        default=50000,
+        type=int,
+        help="number of steps between each FULL/expensive evaluation.",
     )
     parser.add_argument(
         "--epoch",
@@ -162,7 +171,7 @@ def get_args():
     args = parser.parse_args()
     if args.baseline:
         args.max_paragraph_length = 1000
-    assert args.k_distractor <= 8
+    assert args.num_negatives <= 8
     return args
 
 
@@ -257,3 +266,4 @@ def collect_multirc_docs(doc_path="data/multirc/docs/*"):
                 key = fname.split("/")[-1]
                 title2sents[key].append(line.strip())
     return title2sents
+
