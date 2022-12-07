@@ -30,6 +30,9 @@ from eba_utils import prepare_linear, prepare_optim_and_scheduler, padding
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 set_seed(555)
 
+GLOBAL_P_Z = []
+GLOBAL_P_Y = []
+GLOBAL_P_ZY = []
 
 def pad_and_mask(xs):
     lengths = [x.shape[0] for x in xs]
@@ -85,7 +88,7 @@ class DataCollatorForMultipleChoice:
             s = set(range(num_docs))
             s.remove(label)
             distractors = random.sample(list(s), self.num_distractors)
-            z_idxs = [label] + distractors
+            z_idxs = distractors + [label]
             doc_idxs.append(z_idxs)
 
         doc_lengths = [len(x) for x in docs]
@@ -122,6 +125,7 @@ class DataCollatorForMultipleChoice:
         batch["doc_input_ids"] = batch_docs.input_ids
         batch["doc_attention_mask"] = batch_docs.attention_mask
 
+        """
         # encoded inputs
         enc_x = [feature.pop("enc_x") for feature in features]
         enc_sents = [feature.pop("enc_sents") for feature in features]
@@ -142,14 +146,19 @@ class DataCollatorForMultipleChoice:
         # raw x and docs to concat for answer later
         batch["enc_x"] = enc_x
         batch["enc_docs"] = enc_docs
+        """
 
         return batch
 
 
 def prepare_model(args):
+    model_dir = "saved_models/simp2-model-roberta-large lr-5e-05 bs-1 k-3 tp-0 beam-2 reg-0 topk-doc-4"
     model = AutoModel.from_pretrained(args.model_dir)
     model = model.to(device)
     linear = prepare_linear(model.config.hidden_size)
+    linear_path = "saved_models/simp2-model-roberta-large lr-5e-05 bs-1 k-3 tp-0 beam-2 reg-0 topk-doc-4-others.pt"
+    meh = torch.load(linear_path)
+    linear = meh[0]
     return [model, linear]
 
 
@@ -159,7 +168,10 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
         ax,
         docs,
         adocs,
+        doc_first_sentences,
+        adoc_first_sentences,
         doc_labels,
+        doc_negatives,
         answers,
         x_to_sent_idxs,
         enc_sents,
@@ -176,7 +188,10 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
         tax,
         tdocs,
         tadocs,
+        tdoc_first_sentences,
+        tadoc_first_sentences,
         tdoc_labels,
+        tdoc_negatives,
         tanswers,
         tx_to_sent_idxs,
         tenc_sents,
@@ -190,35 +205,41 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
     )
 
     train_dataset = SubflowAbcdDataset(
-        x,
-        ax,
-        docs,
-        adocs,
-        doc_labels,
-        answers,
-        x_to_sent_idxs,
-        enc_sents,
-        enc_x,
-        enc_docs,
+        x=x,
+        answer_x=ax,
+        docs=docs,
+        answer_docs=adocs,
+        doc_first_sentences=doc_first_sentences,
+        answer_doc_first_sentences=adoc_first_sentences,
+        doc_labels=doc_labels,
+        doc_negatives=doc_negatives,
+        answers=answers,
+        x_to_sent_idxs=x_to_sent_idxs,
+        enc_sents=enc_sents,
+        enc_x=enc_x,
+        enc_docs=enc_docs,
     )
     eval_dataset = SubflowAbcdDataset(
-        tx,
-        tax,
-        tdocs,
-        tadocs,
-        tdoc_labels,
-        tanswers,
-        tx_to_sent_idxs,
-        tenc_sents,
-        tenc_x,
-        tenc_docs,
+        x=tx,
+        answer_x=tax,
+        docs=tdocs,
+        answer_docs=tadocs,
+        doc_first_sentences=tdoc_first_sentences,
+        answer_doc_first_sentences=tadoc_first_sentences,
+        doc_labels=tdoc_labels,
+        doc_negatives=tdoc_negatives,
+        answers=tanswers,
+        x_to_sent_idxs=tx_to_sent_idxs,
+        enc_sents=tenc_sents,
+        enc_x=tenc_x,
+        enc_docs=tenc_docs,
     )
 
     data_collator = DataCollatorForMultipleChoice(
         tok,
         padding="longest",
         max_length=512,
-        num_distractors=args.num_distractors,
+        num_distractors=args.num_negatives,
     )
 
     train_dataloader = DataLoader(
@@ -444,7 +465,69 @@ def run_model(
             bs, num_z, -1
         )
         loss[~labels_mask.view(bs, num_z, -1)] = 0
+        raw_loss = loss
         loss = -(loss.sum(-1) + p_z).logsumexp(-1).mean()
+
+        #print(p_z.softmax(-1))
+        #print(raw_loss.sum(-1))
+        pz = p_z.softmax(-1).cpu().numpy()
+        py = raw_loss.sum(-1).cpu().numpy()
+        pzy = (p_z + raw_loss.sum(-1)).softmax(-1).cpu().numpy()
+
+        subflows = [
+            tokenizer.decode(batch.docs[i]).split()[0]
+            for i in batch.doc_idxs[0]
+        ]
+        print(subflows)
+        print(pz)
+        print(py)
+        print(pzy)
+
+        argmax_z = pz.argmax(-1).item()
+        argmax_y = py.argmax(-1).item()
+        if argmax_z == 3:
+            print("z right")
+        if argmax_y == 3:
+            print("y right")
+
+        print("x")
+        print(tokenizer.decode(batch.input_ids[0]))
+        print("correct z")
+        print(tokenizer.decode(batch.docs[batch.doc_idxs[0,-1]]).split()[0])
+        if argmax_z != 3:
+            print("argmax z")
+            print(tokenizer.decode(batch.docs[batch.doc_idxs[0,argmax_z]]).split()[0])
+        if argmax_y != 3:
+            print("argmax y")
+            print(tokenizer.decode(batch.docs[batch.doc_idxs[0,argmax_y]]).split()[0])
+        print("answer")
+        print(tokenizer.decode(batch.answers[0]))
+
+        import pdb; pdb.set_trace()
+
+
+        GLOBAL_P_Z.append(p_z.softmax(-1).cpu().numpy())
+        GLOBAL_P_Y.append(raw_loss.sum(-1).cpu().numpy())
+        GLOBAL_P_ZY.append((p_z + raw_loss.sum(-1)).log_softmax(-1).cpu().numpy())
+
+        if len(GLOBAL_P_Z) % 1000 == 0:
+            pz = np.concatenate(GLOBAL_P_Z)
+            py = np.concatenate(GLOBAL_P_Y)
+            pzy = np.concatenate(GLOBAL_P_ZY)
+            print("correct z is the last one")
+            print("argmax_z p(z) counts")
+            print(np.bincount(pz.argmax(-1)))
+            print("argmax_z p(y|z) counts")
+            print(np.bincount(py.argmax(-1)))
+            print("argmax_z p(z|y) counts")
+            print(np.bincount(pzy.argmax(-1)))
+            print("average log p(y|z)")
+            print(py.mean())
+            print("average gap in p(y|z-true) b/w true and best other z")
+            gap = py[:,-1] - py[:,:-1].max(-1)
+            print(gap.mean())
+            print("average gap when y is better")
+            print(gap[py.argmax(-1) == num_z-1].mean())
     else:
         # pick out argmax contexts
         # assuming pouts: bs * z_size
@@ -542,12 +625,12 @@ def evaluate(
             answer_golds.append(gold)
 
         # PRIOR Z|X
+        n_neg_docs = eval_batch.doc_idxs.shape[1]
         if not all_docs:
-            n_docs = eval_batch.doc_idxs.shape[1]
             idxes = [s.argmax().item() for s in para_preds.view(bs, n_docs)]
             contrastive_prior_metric.add_batch(
                 predictions=idxes,
-                references=[0] * bs,
+                references=[n_neg_docs] * bs,
             )
 
             if args.save_results and split == "Valid":
@@ -572,7 +655,7 @@ def evaluate(
             contrastive_preds = contrastive_scores.argmax(-1)
             contrastive_prior_metric.add_batch(
                 predictions=contrastive_preds,
-                references=[0] * bs,
+                references=[n_neg_docs] * bs,
             )
 
             if args.save_results and split == "Valid":
@@ -628,9 +711,11 @@ def main():
     )
 
     model_name = args.model_dir.split("/")[-1]
-    run_name = f"simp2-model-{model_name} lr-{args.learning_rate} bs-{args.batch_size*args.gradient_accumulation_steps} k-{args.num_distractors} tp-{args.truncate_paragraph} beam-{args.beam} reg-{args.reg_coeff} topk-doc-{args.topk_doc}"
+    run_name = f"simp2-model-{model_name} lr-{args.learning_rate} bs-{args.batch_size*args.gradient_accumulation_steps} k-{args.num_negatives} tp-{args.truncate_paragraph} beam-{args.beam} reg-{args.reg_coeff} topk-doc-{args.topk_doc}"
     args.run_name = run_name
     all_layers = prepare_model(args)
+
+    answer_model_dir = "saved_models/simp2-model-roberta-large lr-5e-05 bs-1 k-3 tp-0 beam-2 reg-0 topk-doc-4-answer"
     answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)
     answer_model = answer_model.to(device)
 
@@ -660,6 +745,8 @@ def main():
     best_valid = float("-inf")
     all_layers[0].train()
     answer_model.train()
+    all_layers[0].eval() # DBG
+    answer_model.eval() # DBG
     for epoch in range(args.epoch):
         for step, batch in enumerate(train_dataloader):
             if (
@@ -697,6 +784,19 @@ def main():
                         )
                 all_layers[0].train()
                 answer_model.train()
+            with torch.no_grad():
+                _, _, loss, _ = run_model(
+                    batch,
+                    all_layers,
+                    answer_model,
+                    tokenizer,
+                    answer_tokenizer,
+                    reg_coeff=args.reg_coeff,
+                    t=args.sentence_threshold,
+                    max_p=args.max_p,
+                    num_z=args.topk_doc,
+                )
+            """
             _, _, loss, _ = run_model(
                 batch,
                 all_layers,
@@ -709,13 +809,14 @@ def main():
                 num_z=args.topk_doc,
             )
             loss.backward()
+            """
             if (
                 step % args.gradient_accumulation_steps == 0
                 or step == len(train_dataloader) - 1
             ):
-                optim.step()
-                lr_scheduler.step()
-                optim.zero_grad()
+                #optim.step()
+                #lr_scheduler.step()
+                #optim.zero_grad()
                 progress_bar.update(1)
                 completed_steps += 1
                 if not args.nolog:

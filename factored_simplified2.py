@@ -131,6 +131,7 @@ class DataCollatorForMultipleChoice:
         assert (batch_docs == batch_answer_docs).all()
         """
 
+
         # Add back labels for un-encoded inputs
         batch["raw_xs"] = raw_xs
         batch["lengths"] = lengths
@@ -178,8 +179,8 @@ class DataCollatorForMultipleChoice:
 
 def prepare_model(args):
     # DELETE AFTER DBG
-    model_dir = "saved_models/fact2-model-roberta-large lr-2e-05 bs-1 k-7 tp-0 beam-2 reg-0 topk-doc-8 hn-3"
-    #model_dir = args.model_dir
+    #model_dir = "saved_models/fact2-model-roberta-large lr-2e-05 bs-1 k-7 tp-0 beam-2 reg-0 topk-doc-8 hn-3"
+    model_dir = args.model_dir
     model = AutoModel.from_pretrained(model_dir)
     #model = AutoModel.from_pretrained(args.model_dir)
     model = model.to(device)
@@ -291,6 +292,7 @@ def run_lm(
     train=True,
     z_outputs=None,
     use_first_sentence=False,
+    tokenizer=None,
 ):
     model, linear = model
 
@@ -498,9 +500,9 @@ def run_model(
         train=train,
         z_outputs=z_outputs,
         use_first_sentence=use_first_sentence,
+        tokenizer=tokenizer,
     )
     #print(p_z.softmax(-1))
-    #import pdb; pdb.set_trace()
     if train:
         z_size = batch.doc_idxs.shape[1]
         answer_in, answer_attn, labels, labels_mask = pad_answers(
@@ -542,8 +544,9 @@ def run_model(
         tok_loss[~labels_mask.view(bs, num_z, -1)] = 0
         loss = -(tok_loss.sum(-1) + p_z).logsumexp(-1).mean()
 
-        #print(p_z)
-        #print(tok_loss.sum(-1))
+        print(p_z.softmax(-1))
+        print(tok_loss.sum(-1))
+        import pdb; pdb.set_trace()
 
         """
         # this one collapses over time but not batch
@@ -630,7 +633,6 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
                 input_ids=z,
                 attention_mask=z_attention_mask,
             )
-            import pdb; pdb.set_trace()
 
         # ANSWER EVAL Y|X
         gold = answ_tok.batch_decode(eval_batch.answers, skip_special_tokens=True)
@@ -748,7 +750,7 @@ def main():
 
     load_answer = False
     # DELETE LINE BELOW AFTER DBG
-    load_answer = "saved_models/fact2-model-roberta-large lr-2e-05 bs-1 k-7 tp-0 beam-2 reg-0 topk-doc-8 hn-3-answer"
+    #load_answer = "saved_models/fact2-model-roberta-large lr-2e-05 bs-1 k-7 tp-0 beam-2 reg-0 topk-doc-8 hn-3-answer"
     answer_model_dir = args.answer_model_dir if not load_answer else load_answer
 
     answer_model = AutoModelForSeq2SeqLM.from_pretrained(answer_model_dir)
@@ -780,6 +782,8 @@ def main():
     best_valid = float("-inf")
     all_layers[0].train()
     answer_model.train()
+    all_layers[0].eval()
+    answer_model.eval()
     for epoch in range(args.epoch):
         for step, batch in enumerate(train_dataloader):
             if (
