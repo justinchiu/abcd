@@ -54,8 +54,7 @@ class DataCollatorForMultipleChoice:
     max_length: Optional[int] = None
     pad_to_multiple_of: Optional[int] = None
     sep_idx: int = 2
-    num_negatives: int = 0
-    hard_negatives: bool = False
+    num_distractors: int = 3
 
     def __call__(self, features):
         # features[i].keys() == x, answer_x, docs, answer_docs, doc_label, answer
@@ -83,22 +82,14 @@ class DataCollatorForMultipleChoice:
         docs_name = "docs"
         docs = [feature.pop(docs_name) for feature in features][0]
 
-        hard_negatives = [feature.pop("doc_negatives") for feature in features]
-
         doc_idxs = []
-        if self.num_negatives > 0:
-            num_docs = len(docs)
-            for i, label in enumerate(labels):
-                hns = [] if self.hard_negatives <= 0 else hard_negatives[i]
-                s = set(range(num_docs))
-                s.remove(label)
-                if self.hard_negatives > 0:
-                    for hn in hard_negatives[i]:
-                        s.remove(hn)
-                negatives = random.sample(list(s), self.num_negatives - len(hns))
-                # we want the last one to be the label so ties don't count.
-                z_idxs = negatives + hns + [label]
-                doc_idxs.append(z_idxs)
+        num_docs = len(docs)
+        for label in labels:
+            s = set(range(num_docs))
+            s.remove(label)
+            distractors = random.sample(list(s), self.num_distractors)
+            z_idxs = distractors + [label]
+            doc_idxs.append(z_idxs)
 
         doc_lengths = [len(x) for x in docs]
         batch_docs = self.tokenizer.pad(
@@ -161,13 +152,13 @@ class DataCollatorForMultipleChoice:
 
 
 def prepare_model(args):
-    #model_dir = "saved_models/simp2-model-roberta-large lr-5e-05 bs-1 k-3 tp-0 beam-2 reg-0 topk-doc-4"
+    model_dir = "saved_models/simp2-model-roberta-large lr-5e-05 bs-1 k-3 tp-0 beam-2 reg-0 topk-doc-4"
     model = AutoModel.from_pretrained(args.model_dir)
     model = model.to(device)
     linear = prepare_linear(model.config.hidden_size)
-    #linear_path = "saved_models/simp2-model-roberta-large lr-5e-05 bs-1 k-3 tp-0 beam-2 reg-0 topk-doc-4-others.pt"
-    #meh = torch.load(linear_path)
-    #linear = meh[0]
+    linear_path = "saved_models/simp2-model-roberta-large lr-5e-05 bs-1 k-3 tp-0 beam-2 reg-0 topk-doc-4-others.pt"
+    meh = torch.load(linear_path)
+    linear = meh[0]
     return [model, linear]
 
 
@@ -248,8 +239,7 @@ def prepare_dataloader(tok, answer_tok, args, encoder):
         tok,
         padding="longest",
         max_length=512,
-        num_negatives=args.num_negatives,
-        hard_negatives=args.num_hard_negatives,
+        num_distractors=args.num_negatives,
     )
 
     train_dataloader = DataLoader(
@@ -477,6 +467,67 @@ def run_model(
         loss[~labels_mask.view(bs, num_z, -1)] = 0
         raw_loss = loss
         loss = -(loss.sum(-1) + p_z).logsumexp(-1).mean()
+
+        #print(p_z.softmax(-1))
+        #print(raw_loss.sum(-1))
+        pz = p_z.softmax(-1).cpu().numpy()
+        py = raw_loss.sum(-1).cpu().numpy()
+        pzy = (p_z + raw_loss.sum(-1)).softmax(-1).cpu().numpy()
+
+        subflows = [
+            tokenizer.decode(batch.docs[i]).split()[0]
+            for i in batch.doc_idxs[0]
+        ]
+        print(subflows)
+        print(pz)
+        print(py)
+        print(pzy)
+
+        argmax_z = pz.argmax(-1).item()
+        argmax_y = py.argmax(-1).item()
+        if argmax_z == 3:
+            print("z right")
+        if argmax_y == 3:
+            print("y right")
+
+        print("x")
+        print(tokenizer.decode(batch.input_ids[0]))
+        print("correct z")
+        print(tokenizer.decode(batch.docs[batch.doc_idxs[0,-1]]).split()[0])
+        if argmax_z != 3:
+            print("argmax z")
+            print(tokenizer.decode(batch.docs[batch.doc_idxs[0,argmax_z]]).split()[0])
+        if argmax_y != 3:
+            print("argmax y")
+            print(tokenizer.decode(batch.docs[batch.doc_idxs[0,argmax_y]]).split()[0])
+        print("answer")
+        print(tokenizer.decode(batch.answers[0]))
+
+        import pdb; pdb.set_trace()
+
+
+        GLOBAL_P_Z.append(p_z.softmax(-1).cpu().numpy())
+        GLOBAL_P_Y.append(raw_loss.sum(-1).cpu().numpy())
+        GLOBAL_P_ZY.append((p_z + raw_loss.sum(-1)).log_softmax(-1).cpu().numpy())
+
+        if len(GLOBAL_P_Z) % 1000 == 0:
+            pz = np.concatenate(GLOBAL_P_Z)
+            py = np.concatenate(GLOBAL_P_Y)
+            pzy = np.concatenate(GLOBAL_P_ZY)
+            print("correct z is the last one")
+            print("argmax_z p(z) counts")
+            print(np.bincount(pz.argmax(-1)))
+            print("argmax_z p(y|z) counts")
+            print(np.bincount(py.argmax(-1)))
+            print("argmax_z p(z|y) counts")
+            print(np.bincount(pzy.argmax(-1)))
+            print("average log p(y|z)")
+            print(py.mean())
+            print("average gap in p(y|z-true) b/w true and best other z")
+            gap = py[:,-1] - py[:,:-1].max(-1)
+            print(gap.mean())
+            print("average gap when y is better")
+            print(gap[py.argmax(-1) == num_z-1].mean())
     else:
         # pick out argmax contexts
         # assuming pouts: bs * z_size
@@ -575,18 +626,16 @@ def evaluate(
 
         # PRIOR Z|X
         n_neg_docs = eval_batch.doc_idxs.shape[1]
-        contrastive_label = eval_batch.doc_idxs.shape[1]-1
         if not all_docs:
-            idxes = [s.argmax().item() for s in para_preds.view(bs, n_neg_docs)]
+            idxes = [s.argmax().item() for s in para_preds.view(bs, n_docs)]
             contrastive_prior_metric.add_batch(
                 predictions=idxes,
-                references=[contrastive_label] * bs,
+                references=[n_neg_docs] * bs,
             )
-
 
             if args.save_results and split == "Valid":
                 con_preds.append(para_preds)
-                con_golds.append([contrastive_label] * bs)
+                con_golds.append([0] * bs)
                 con_docs.append(eval_batch.doc_idxs)
                 doc_preds.append(None)
                 doc_golds.append(eval_batch.labels)
@@ -606,12 +655,12 @@ def evaluate(
             contrastive_preds = contrastive_scores.argmax(-1)
             contrastive_prior_metric.add_batch(
                 predictions=contrastive_preds,
-                references=[contrastive_label] * bs,
+                references=[n_neg_docs] * bs,
             )
 
             if args.save_results and split == "Valid":
                 con_preds.append(contrastive_scores)
-                con_golds.append([contrastive_label] * bs)
+                con_golds.append([0] * bs)
                 con_docs.append(eval_batch.doc_idxs)
                 doc_preds.append(para_preds)
                 doc_golds.append(labels)
@@ -662,17 +711,7 @@ def main():
     )
 
     model_name = args.model_dir.split("/")[-1]
-    run_name = (
-        f"simp2-model-{model_name} "
-        f"lr-{args.learning_rate} "
-        f"bs-{args.batch_size*args.gradient_accumulation_steps} "
-        f"k-{args.num_negatives} "
-        f"tp-{args.truncate_paragraph} "
-        f"beam-{args.beam} reg-{args.reg_coeff} "
-        f"topk-doc-{args.topk_doc} "
-        f"hn-{args.num_hard_negatives} "
-        f"fs-{args.use_first_sentence} "
-    )
+    run_name = f"simp2-model-{model_name} lr-{args.learning_rate} bs-{args.batch_size*args.gradient_accumulation_steps} k-{args.num_negatives} tp-{args.truncate_paragraph} beam-{args.beam} reg-{args.reg_coeff} topk-doc-{args.topk_doc}"
     args.run_name = run_name
     all_layers = prepare_model(args)
 
@@ -706,6 +745,8 @@ def main():
     best_valid = float("-inf")
     all_layers[0].train()
     answer_model.train()
+    all_layers[0].eval() # DBG
+    answer_model.eval() # DBG
     for epoch in range(args.epoch):
         for step, batch in enumerate(train_dataloader):
             if (
@@ -743,7 +784,6 @@ def main():
                         )
                 all_layers[0].train()
                 answer_model.train()
-            """
             with torch.no_grad():
                 _, _, loss, _ = run_model(
                     batch,
@@ -769,6 +809,7 @@ def main():
                 num_z=args.topk_doc,
             )
             loss.backward()
+            """
             if (
                 step % args.gradient_accumulation_steps == 0
                 or step == len(train_dataloader) - 1

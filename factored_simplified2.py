@@ -353,7 +353,10 @@ def run_lm(
         "bh,bdh->bd",
         x_pooled_output,
         z_pooled_output,
-    )
+    ) / 32
+    # dim = 1024, sqrt(dim) = 32
+    #print(logits.softmax(-1))
+    #print((logits / 32).softmax(-1))
     """
     if train:
         dropout = nn.Dropout(model.config.hidden_dropout_prob)
@@ -544,10 +547,6 @@ def run_model(
         tok_loss[~labels_mask.view(bs, num_z, -1)] = 0
         loss = -(tok_loss.sum(-1) + p_z).logsumexp(-1).mean()
 
-        print(p_z.softmax(-1))
-        print(tok_loss.sum(-1))
-        import pdb; pdb.set_trace()
-
         """
         # this one collapses over time but not batch
         #dbg_loss_fn = nn.CrossEntropyLoss(reduce=False)
@@ -610,8 +609,8 @@ def evaluate(steps, args, layers, answ_model, tok, answ_tok, dataloader, split):
     z_outputs = None
     #z_outputs = True # DBG remove
     # run evaluation
-    for step, eval_batch in enumerate(dataloader):
-    #for step, eval_batch in track(enumerate(dataloader), total=len(dataloader)):
+    #for step, eval_batch in enumerate(dataloader):
+    for step, eval_batch in track(enumerate(dataloader), total=len(dataloader)):
         bs = len(eval_batch.answers)
         n_docs = len(eval_batch.docs)
 
