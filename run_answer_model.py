@@ -43,6 +43,7 @@ def get_args():
     parser.add_argument("--save_results", action="store_true")
     parser.add_argument("--num_dialogue_turns", default=0, type=int)
     parser.add_argument("--num_doc_sents", default=0, type=int)
+    parser.add_argument("--max_length", default=512, type=int)
     parser.add_argument("--num_negatives", default=0, type=int)
     parser.add_argument("--num_hard_negatives", default=0, type=int)
     parser.add_argument(
@@ -144,9 +145,7 @@ def prepare_dataloader(tokenizer, args):
         padding=True,
         truncation=True,
         max_length=args.max_length,
-    )
-    doc_ids = tokenized_docs.input_ids
-    doc_mask = tokenized_docs.attention_mask
+    ).to(device)
 
     def convert_to_features(example_batch):
         tokenized_x = tokenizer(
@@ -180,6 +179,7 @@ def prepare_dataloader(tokenizer, args):
             "x_mask": x_mask,
             "ids": example_batch["ids"],
             "doc_idxs": doc_idxs,
+            "doc_labels": doc_labels,
         }
         return encodings
 
@@ -189,6 +189,7 @@ def prepare_dataloader(tokenizer, args):
             "x_ids",
             "x_mask",
             "doc_idxs",
+            "doc_labels",
         ]
         dataset.set_format(type="torch", columns=columns, output_all_columns=False)
         return dataset
@@ -196,31 +197,127 @@ def prepare_dataloader(tokenizer, args):
     train = process_dataset(train_dataset)
     valid = process_dataset(valid_dataset)
 
+    # is this a bug in BatchSampler?
     def collate_fn(batch):
-        return batch[0]
+        return {k: v.to(device) for k, v in  batch[0].items()}
 
-    sampler = BatchSampler(
-        RandomSampler(train), batch_size=args.batch_size, drop_last=False
+    #sampler = BatchSampler(
+    #    RandomSampler(train), batch_size=args.batch_size, drop_last=False
+    #)
+    train_dataloader = DataLoader(
+        train,
+        batch_size=args.batch_size,
+        drop_last=False,
+        shuffle=True,
+        pin_memory=True,
+        pin_memory_device=str(device),
     )
-    train_dataloader = DataLoader(train, sampler=sampler, collate_fn=collate_fn)
-    # train_dataloader = DataLoader(train, sampler=sampler)
 
-    sampler = BatchSampler(valid, batch_size=args.eval_batch_size, drop_last=False)
-    valid_dataloader = DataLoader(valid, sampler=sampler, collate_fn=collate_fn)
+    #sampler = BatchSampler(valid, batch_size=args.eval_batch_size, drop_last=False)
+    valid_dataloader = DataLoader(
+        valid,
+        batch_size=args.eval_batch_size,
+        drop_last=False,
+        shuffle = False,
+        pin_memory=True,
+        pin_memory_device=str(device),
+    )
     # valid_dataloader = DataLoader(valid, sampler=sampler)
 
-    for batch in train_dataloader:
-        print(batch)
-        pdb.set_trace()
-    return train_dataloader, valid_dataloader
+    #for batch in train_dataloader:
+    #    print(batch)
+    #    pdb.set_trace()
+
+    return train_dataloader, valid_dataloader, tokenized_docs
 
 
-def run_answer_model(model, input_ids, attn_mask, answs, tokenizer, beam, train):
-    return model(
-        input_ids=input_ids,
-        attention_mask=attn_mask,
-        labels=answs,
+def run_model(batch, docs, model):
+    x_ids = batch["x_ids"].to(device)
+    x_mask = batch["x_mask"].to(device)
+    z_idxs = batch["doc_idxs"].to(device)
+
+    bsz, x_len = x_ids.shape
+
+    z_ids = docs.input_ids
+    z_mask = docs.attention_mask
+
+    bsz, num_z = z_idxs.shape
+    total_num_z, z_len = z_ids.shape
+
+    z = z_ids[z_idxs]
+    mask = z_mask[z_idxs]
+
+    labels = x_ids[:,None].expand(bsz,num_z,x_len).contiguous().view(bsz*num_z, x_len)
+
+    out = model(
+        input_ids = z.view(bsz*num_z, z_len),
+        attention_mask = mask.view(bsz*num_z, z_len),
+        labels = labels,
     )
+    logits = out.logits.log_softmax(-1)
+    N, T, V = logits.shape
+    tok_loss = logits[torch.arange(N)[:, None], torch.arange(T), labels].view(
+        bsz, num_z, T
+    )
+    tok_loss[~x_mask.bool()[:,None].expand(bsz, num_z, T)] = 0
+    log_py_z = tok_loss.sum(-1)
+    neg_log_py = -log_py_z.logsumexp(-1).mean()
+    return neg_log_py, log_py_z
+
+def evaluate(steps, args, model, dataloader, docs, split):
+    y_nll = 0
+    num_examples = 0
+    acc_metric = load_metric("accuracy")
+    contrastive_acc_metric = load_metric("accuracy")
+
+    if args.save_results and split == "Valid":
+        con_preds = []
+        con_golds = []
+        con_docs = []
+        doc_preds = []
+        doc_golds = []
+
+
+    num_docs = docs.input_ids.shape[0]
+    z_idxs = torch.arange(num_docs, device=device, dtype=torch.int64)
+    #for step, batch in enumerate(dataloader):
+    for step, batch in track(enumerate(dataloader), total=len(dataloader)):
+        doc_idxs = batch["doc_idxs"].to(device)
+        bsz, num_z = doc_idxs.shape
+
+        batch["doc_idxs"] = z_idxs[None].expand(bsz, num_docs)
+        loss, log_py_z = run_model(batch, docs, model)
+        y_nll += loss * bsz
+        num_examples += bsz
+
+        z_hat = log_py_z.argmax(-1)
+        contrastive_scores = log_py_z[torch.arange(bsz)[:,None], doc_idxs]
+        z_hat_contrastive = contrastive_scores.argmax(-1)
+
+        acc_metric.add_batch(
+            predictions=z_hat,
+            references=batch["doc_labels"],
+        )
+        contrastive_acc_metric.add_batch(
+            predictions=z_hat_contrastive,
+            references=[num_z-1]*bsz,
+        )
+
+    avg_loss = y_nll.item() / num_examples
+    z_acc = acc_metric.compute()
+    con_acc = contrastive_acc_metric.compute()
+
+    if not args.nolog:
+        wandb.log(
+            {
+                "step": steps,
+                f"{split} Answer NLL": avg_loss,
+                f"{split} Subflow Acc": z_acc,
+                f"{split} Contrastive Subflow Acc": z_con_acc,
+            }
+        )
+
+    return avg_loss
 
 
 def main():
@@ -232,6 +329,9 @@ def main():
         f"answer-model-{model_name} "
         f"lr-{args.learning_rate} "
         f"bs-{args.batch_size*args.gradient_accumulation_steps} "
+        f"dt-{args.num_dialogue_turns} "
+        f"ds-{args.num_doc_sents} "
+        f"ml-{args.max_length} "
         f"k-{args.num_negatives} "
         f"hn-{args.num_hard_negatives}"
     )
@@ -242,7 +342,7 @@ def main():
     answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)
     answer_model = answer_model.to(device)
 
-    train_dataloader, eval_dataloader = prepare_dataloader(
+    train_dataloader, eval_dataloader, docs = prepare_dataloader(
         answer_tokenizer,
         args,
     )
@@ -260,11 +360,10 @@ def main():
     if not args.nolog:
         wandb.init(name=run_name, project="abcd_unsup_subflow", tags=["abcd"])
         wandb.config.lr = args.learning_rate
-        wandb.watch(all_layers[0])
         wandb.watch(answer_model)
 
-    best_valid = float("-inf")
-    all_layers[0].train()
+    #best_valid = float("-inf")
+    best_valid = float("inf")
     answer_model.train()
     for epoch in range(args.epoch):
         for step, batch in enumerate(train_dataloader):
@@ -273,46 +372,24 @@ def main():
                 and completed_steps > 0
                 and step % args.gradient_accumulation_steps == 0
             ):
-                all_layers[0].eval()
                 answer_model.eval()
                 with torch.no_grad():
-                    valid_acc = evaluate(
-                        completed_steps,
-                        args,
-                        all_layers,
-                        answer_model,
-                        tokenizer,
-                        answer_tokenizer,
-                        eval_dataloader,
-                        "Valid",
+                    valid_loss = evaluate(
+                        steps=completed_steps,
+                        args=args,
+                        model=answer_model,
+                        docs=docs,
+                        dataloader=eval_dataloader,
+                        split="Valid",
                     )
-                if valid_acc > best_valid:
+                if valid_loss < best_valid:
                     best_valid = valid_acc
                     if args.save_model:
-                        all_layers[0].save_pretrained(
-                            f"{args.output_model_dir}/{run_name}"
-                        )
-                        torch.save(
-                            all_layers[1:],
-                            f"{args.output_model_dir}/{run_name}-others.pt",
-                        )
                         answer_model.save_pretrained(
                             f"{args.output_model_dir}/{run_name}-answer"
                         )
-                all_layers[0].train()
                 answer_model.train()
-            _, _, loss, _ = run_model(
-                batch,
-                all_layers,
-                answer_model,
-                tokenizer,
-                answer_tokenizer,
-                reg_coeff=args.reg_coeff,
-                t=args.sentence_threshold,
-                max_p=args.max_p,
-                num_z=args.topk_doc,
-                use_first_sentence=args.use_first_sentence,
-            )
+            loss, _ = run_model(batch, docs, answer_model)
             loss.backward()
             if (
                 step % args.gradient_accumulation_steps == 0
