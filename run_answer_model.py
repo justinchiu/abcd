@@ -129,10 +129,10 @@ def get_args():
 
 def prepare_dataloader(tokenizer, args):
     train_dataset, docs, subflow_map = get_abcd_dataset(
-        tokenizer, "train", args.num_dialogue_turns, args.num_doc_sents
+        "train", args.num_dialogue_turns, args.num_doc_sents
     )
     valid_dataset, _, _ = get_abcd_dataset(
-        tokenizer, "dev", args.num_dialogue_turns, args.num_doc_sents
+        "dev", args.num_dialogue_turns, args.num_doc_sents
     )
 
     num_docs = len(docs)

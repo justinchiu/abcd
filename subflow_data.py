@@ -96,7 +96,6 @@ def convert_manual(ontology, manual, lower):
 
 
 def get_abcd_dataset(
-    tokenizer,
     split,
     num_dialogue_turns,
     num_doc_sents,
