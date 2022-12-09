@@ -305,7 +305,7 @@ def evaluate(steps, args, model, dataloader, docs, split):
 
     avg_loss = y_nll.item() / num_examples
     z_acc = acc_metric.compute()
-    con_acc = contrastive_acc_metric.compute()
+    z_con_acc = contrastive_acc_metric.compute()
 
     if not args.nolog:
         wandb.log(
@@ -383,7 +383,7 @@ def main():
                         split="Valid",
                     )
                 if valid_loss < best_valid:
-                    best_valid = valid_acc
+                    best_valid = valid_loss
                     if args.save_model:
                         answer_model.save_pretrained(
                             f"{args.output_model_dir}/{run_name}-answer"
