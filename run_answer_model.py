@@ -1,3 +1,4 @@
+import argparse
 from collections import Counter
 from dataclasses import dataclass
 from itertools import chain
@@ -9,11 +10,16 @@ import numpy as np
 import random
 import wandb
 
+import pdb
+
+from datasets import load_metric
+from torch.utils.data.sampler import BatchSampler, RandomSampler
+
+
 # from dataset import prepare_simplified, SimplifiedHotpotQADataset
 # from eba_subflow_dataset import prepare_subflow_abcd, SubflowAbcdDataset
 # from eba_subflow_factored_dataset import prepare_subflow_abcd, SubflowAbcdDataset
-from subflow_data import prepare_subflow_abcd, SubflowAbcdDataset
-from datasets import load_metric
+from subflow_data import get_abcd_dataset, SubflowAbcdDataset
 from rich.progress import track
 from transformers import AutoModel, AutoModelForSeq2SeqLM
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
@@ -26,7 +32,8 @@ from torch import nn
 from eba_utils import prepare_optim_and_scheduler
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-set_seed(555)
+seed = 555
+set_seed(seed)
 
 
 def get_args():
@@ -34,6 +41,8 @@ def get_args():
     parser.add_argument("--nolog", action="store_true")
     parser.add_argument("--save_model", action="store_true")
     parser.add_argument("--save_results", action="store_true")
+    parser.add_argument("--num_dialogue_turns", default=0, type=int)
+    parser.add_argument("--num_doc_sents", default=0, type=int)
     parser.add_argument("--num_negatives", default=0, type=int)
     parser.add_argument("--num_hard_negatives", default=0, type=int)
     parser.add_argument(
@@ -116,11 +125,97 @@ def get_args():
     args = parser.parse_args()
     return args
 
+
 def prepare_dataloader(tokenizer, args):
-    import pdb; pdb.set_trace()
+    train_dataset, docs, subflow_map = get_abcd_dataset(
+        tokenizer, "train", args.num_dialogue_turns, args.num_doc_sents
+    )
+    valid_dataset, _, _ = get_abcd_dataset(
+        tokenizer, "dev", args.num_dialogue_turns, args.num_doc_sents
+    )
+
+    num_docs = len(docs)
+
+    padding_token = tokenizer.pad_token_id
+
+    tokenized_docs = tokenizer(
+        docs,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=args.max_length,
+    )
+    doc_ids = tokenized_docs.input_ids
+    doc_mask = tokenized_docs.attention_mask
+
+    def convert_to_features(example_batch):
+        tokenized_x = tokenizer(
+            example_batch["xs"],
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=args.max_length,
+        )
+        x_ids = tokenized_x.input_ids
+        x_mask = tokenized_x.attention_mask
+        x_ids[x_ids == padding_token] = -100
+
+        doc_labels = example_batch["doc_labels"]
+        doc_negatives = example_batch["doc_negatives"]
+
+        random_negatives = []
+        s = set(range(num_docs))
+        for i, (label, negs) in enumerate(zip(doc_labels, doc_negatives)):
+            this_s = s.difference(set(negs + [label]))
+            negatives = random.sample(list(this_s), args.num_negatives)
+            random_negatives.append(list(negatives))
+
+        doc_idxs = [
+            rnegs + negs + [label]
+            for rnegs, negs, label in zip(random_negatives, doc_negatives, doc_labels)
+        ]
+
+        encodings = {
+            "x_ids": x_ids,
+            "x_mask": x_mask,
+            "ids": example_batch["ids"],
+            "doc_idxs": doc_idxs,
+        }
+        return encodings
+
+    def process_dataset(dataset):
+        dataset = dataset.map(convert_to_features, batched=True)
+        columns = [
+            "x_ids",
+            "x_mask",
+            "doc_idxs",
+        ]
+        dataset.set_format(type="torch", columns=columns, output_all_columns=False)
+        return dataset
+
+    train = process_dataset(train_dataset)
+    valid = process_dataset(valid_dataset)
+
+    def collate_fn(batch):
+        return batch[0]
+
+    sampler = BatchSampler(
+        RandomSampler(train), batch_size=args.batch_size, drop_last=False
+    )
+    train_dataloader = DataLoader(train, sampler=sampler, collate_fn=collate_fn)
+    # train_dataloader = DataLoader(train, sampler=sampler)
+
+    sampler = BatchSampler(valid, batch_size=args.eval_batch_size, drop_last=False)
+    valid_dataloader = DataLoader(valid, sampler=sampler, collate_fn=collate_fn)
+    # valid_dataloader = DataLoader(valid, sampler=sampler)
+
+    for batch in train_dataloader:
+        print(batch)
+        pdb.set_trace()
+    return train_dataloader, valid_dataloader
+
 
 def run_answer_model(model, input_ids, attn_mask, answs, tokenizer, beam, train):
-    answs[answs == model.config.pad_token_id] = -100
     return model(
         input_ids=input_ids,
         attention_mask=attn_mask,
@@ -130,23 +225,20 @@ def run_answer_model(model, input_ids, attn_mask, answs, tokenizer, beam, train)
 
 def main():
     args = get_args()
-    answer_tokenizer = AutoTokenizer.from_pretrained(
-        args.answer_model_dir, truncation_side="left"
-    )
+    answer_tokenizer = AutoTokenizer.from_pretrained(args.answer_model_dir)
 
     model_name = args.model_dir.split("/")[-1]
     run_name = (
-        f"answ-model-{model_name} "
+        f"answer-model-{model_name} "
         f"lr-{args.learning_rate} "
         f"bs-{args.batch_size*args.gradient_accumulation_steps} "
         f"k-{args.num_negatives} "
-        f"hn-{args.num_hard_negatives} "
-        f"fs-{args.use_first_sentence} "
+        f"hn-{args.num_hard_negatives}"
     )
     args.run_name = run_name
 
-    #answer_model_dir = args.answer_model_dir if not load_answer else load_answer
-    #answer_model = AutoModelForSeq2SeqLM.from_pretrained(answer_model_dir)
+    # answer_model_dir = args.answer_model_dir if not load_answer else load_answer
+    # answer_model = AutoModelForSeq2SeqLM.from_pretrained(answer_model_dir)
     answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)
     answer_model = answer_model.to(device)
 
@@ -237,4 +329,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

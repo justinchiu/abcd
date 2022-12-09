@@ -266,4 +266,3 @@ def collect_multirc_docs(doc_path="data/multirc/docs/*"):
                 key = fname.split("/")[-1]
                 title2sents[key].append(line.strip())
     return title2sents
-

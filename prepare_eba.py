@@ -68,6 +68,7 @@ def get_subflow_sentences(manual, flow, subflow):
             sentences.append(subtext.lower())
     return sentences
 
+
 def convert_manual(
     manual,
     examples,
@@ -107,7 +108,9 @@ def convert_example(
         f"{speaker.lower()}: {utt.lower()}" for speaker, utt in example["original"]
     ]
     dialogue = [cls_token] + action_texts
-    histories = [f" {sep_token} ".join(dialogue[: i + 1]) for i in range(len(dialogue) - 1)]
+    histories = [
+        f" {sep_token} ".join(dialogue[: i + 1]) for i in range(len(dialogue) - 1)
+    ]
     xs = histories
 
     # TODO: check how colons get split using tokenizer
@@ -163,8 +166,6 @@ if __name__ == "__main__":
     eba_dir = Path("eba_data")
     eba_dir.mkdir(exist_ok=True)
 
-
-
     for split in ["train", "dev", "test"]:
         # examples = [convert_example(e) for e in track(raw_data[split])]
         examples = [convert_example(e) for e in raw_data[split]]
@@ -183,29 +184,45 @@ if __name__ == "__main__":
         print(np.max([len(x.split()) for d in examples for x in d["xs"]]))
 
         print("Avg z len")
-        print(np.mean([
-            len(sent.split())
-            for flow, subflow_dict in split_manual.items()
-            for subflow, sents in subflow_dict.items()
-            for sent in sents
-        ]))
+        print(
+            np.mean(
+                [
+                    len(sent.split())
+                    for flow, subflow_dict in split_manual.items()
+                    for subflow, sents in subflow_dict.items()
+                    for sent in sents
+                ]
+            )
+        )
         print("Max z len")
-        print(np.max([
-            len(sent.split())
-            for flow, subflow_dict in split_manual.items()
-            for subflow, sents in subflow_dict.items()
-            for sent in sents
-        ]))
+        print(
+            np.max(
+                [
+                    len(sent.split())
+                    for flow, subflow_dict in split_manual.items()
+                    for subflow, sents in subflow_dict.items()
+                    for sent in sents
+                ]
+            )
+        )
 
         print("Avg d len")
-        print(np.mean([
-            len(" ".join(sents).split())
-            for flow, subflow_dict in split_manual.items()
-            for subflow, sents in subflow_dict.items()
-        ]))
+        print(
+            np.mean(
+                [
+                    len(" ".join(sents).split())
+                    for flow, subflow_dict in split_manual.items()
+                    for subflow, sents in subflow_dict.items()
+                ]
+            )
+        )
         print("Max d len")
-        print(np.max([
-            len(" ".join(sents).split())
-            for flow, subflow_dict in split_manual.items()
-            for subflow, sents in subflow_dict.items()
-        ]))
+        print(
+            np.max(
+                [
+                    len(" ".join(sents).split())
+                    for flow, subflow_dict in split_manual.items()
+                    for subflow, sents in subflow_dict.items()
+                ]
+            )
+        )
