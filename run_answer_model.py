@@ -319,8 +319,6 @@ def evaluate(steps, args, model, dataloader, docs, split):
     contrastive_acc_metric = load_metric("accuracy")
 
     if not args.no_save_results and split == "Valid":
-        con_preds = []
-        con_golds = []
         con_docs = []
         doc_preds = []
         doc_golds = []
@@ -336,14 +334,13 @@ def evaluate(steps, args, model, dataloader, docs, split):
         batch["doc_idxs"] = z_idxs[None].expand(bsz, num_docs)
         loss, log_py_z = run_model(batch, docs, model)
 
-
         y_nll += loss * bsz
         num_examples += bsz
 
         # log_py_z: bsz x num_z x time
         cum_log_py_z = log_py_z.cumsum(-1)
         z_hat = cum_log_py_z.argmax(1)
-        contrastive_scores = log_py_z[torch.arange(bsz)[:,None], doc_idxs]
+        contrastive_scores = cum_log_py_z[torch.arange(bsz)[:,None], doc_idxs]
         z_hat_contrastive = contrastive_scores.argmax(1)
 
         # index into start of agent turns
@@ -365,6 +362,11 @@ def evaluate(steps, args, model, dataloader, docs, split):
             references=[num_z-1]*sum(num_agent_turns),
         )
 
+        if not args.no_save_results and split == "Valid":
+            con_docs.append(doc_idxs.cpu())
+            doc_preds.append(cum_log_py_z.cpu())
+            doc_golds.append(batch["doc_labels"].cpu())
+
     avg_loss = y_nll.item() / num_examples
     z_acc = acc_metric.compute()
     z_con_acc = contrastive_acc_metric.compute()
@@ -377,6 +379,15 @@ def evaluate(steps, args, model, dataloader, docs, split):
                 f"{split} Subflow Acc": z_acc,
                 f"{split} Contrastive Subflow Acc": z_con_acc,
             }
+        )
+    if not args.no_save_results and split == "Valid":
+        torch.save(
+            (
+                con_docs,
+                doc_preds,
+                doc_golds,
+            ),
+            f"logging/{args.run_name}|step-{steps}.pt",
         )
 
     print(avg_loss)
