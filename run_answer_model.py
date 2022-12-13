@@ -36,6 +36,12 @@ seed = 555
 set_seed(seed)
 
 
+start_customer_token = "custom"
+customer_token = "Ġcustomer"
+start_agent_token = "agent"
+agent_token = "Ġagent"
+
+
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--nolog", action="store_true")
@@ -137,7 +143,14 @@ def prepare_dataloader(tokenizer, args):
 
     num_docs = len(docs)
 
-    padding_token = tokenizer.pad_token_id
+    padding_id = tokenizer.pad_token_id
+
+    (
+        start_customer_id, customer_id,
+        start_agent_id, agent_id,
+    ) = tokenizer.convert_tokens_to_ids([
+        start_customer_token, customer_token, start_agent_token, agent_token
+    ])
 
     tokenized_docs = tokenizer(
         docs,
@@ -157,7 +170,37 @@ def prepare_dataloader(tokenizer, args):
         )
         x_ids = tokenized_x.input_ids
         x_mask = tokenized_x.attention_mask
-        x_ids[x_ids == padding_token] = -100
+        x_ids[x_ids == padding_id] = -100
+
+        # GET TURN INDICES
+        # True if conversation starts with agent
+        # first token is bos <s>
+        agent_start = x_ids[:,1] == start_agent_id
+
+        # make sure all start-of-turn tokens have a trailing comma,
+        # "Gagent:" and "Gcustomer:"
+        # If agent does not have trailing colon, it may be due to truncation.
+        # Customer is a valid word, so may not have a trailing colon,
+        # eg "welcome to customer service".
+        colon_id = tokenizer.convert_tokens_to_ids(":")
+        is_next_token_colon = torch.zeros_like(x_ids, dtype=bool)
+        is_next_token_colon[:,:-1] = x_ids[:,1:] == colon_id
+
+        customer_turn = (x_ids == customer_id) & is_next_token_colon
+        agent_turn = (x_ids == agent_id) & is_next_token_colon
+        agent_turn[:,1] = agent_start
+        customer_turn[:,1] = ~agent_start
+        turn_locations = customer_turn | agent_turn
+
+        if False:
+            # DBG
+            next_token_id = x_ids[:,1:]
+            not_agent_token = (x_ids == agent_id) & ~is_next_token_colon
+            not_customer_token = (x_ids == customer_id) & ~is_next_token_colon
+
+            print(not_agent_token.nonzero())
+            # check x_ids for this
+            # / DBG
 
         doc_labels = example_batch["doc_labels"]
         doc_negatives = example_batch["doc_negatives"]
@@ -180,6 +223,8 @@ def prepare_dataloader(tokenizer, args):
             "ids": example_batch["ids"],
             "doc_idxs": doc_idxs,
             "doc_labels": doc_labels,
+            "agent_turn_mask": agent_turn,
+            "customer_turn_mask": customer_turn,
         }
         return encodings
 
@@ -188,8 +233,11 @@ def prepare_dataloader(tokenizer, args):
         columns = [
             "x_ids",
             "x_mask",
+            "ids",
             "doc_idxs",
             "doc_labels",
+            "agent_turn_mask",
+            "customer_turn_mask",
         ]
         dataset.set_format(type="torch", columns=columns, output_all_columns=False)
         return dataset
@@ -262,7 +310,7 @@ def run_model(batch, docs, model):
     tok_loss[~x_mask.bool()[:,None].expand(bsz, num_z, T)] = 0
     log_py_z = tok_loss.sum(-1)
     neg_log_py = -log_py_z.logsumexp(-1).mean()
-    return neg_log_py, log_py_z
+    return neg_log_py, tok_loss
 
 def evaluate(steps, args, model, dataloader, docs, split):
     y_nll = 0
@@ -287,20 +335,34 @@ def evaluate(steps, args, model, dataloader, docs, split):
 
         batch["doc_idxs"] = z_idxs[None].expand(bsz, num_docs)
         loss, log_py_z = run_model(batch, docs, model)
+
+
         y_nll += loss * bsz
         num_examples += bsz
 
-        z_hat = log_py_z.argmax(-1)
+        # log_py_z: bsz x num_z x time
+        cum_log_py_z = log_py_z.cumsum(-1)
+        z_hat = cum_log_py_z.argmax(1)
         contrastive_scores = log_py_z[torch.arange(bsz)[:,None], doc_idxs]
-        z_hat_contrastive = contrastive_scores.argmax(-1)
+        z_hat_contrastive = contrastive_scores.argmax(1)
+
+        # index into start of agent turns
+        agent_mask = batch["agent_turn_mask"]
+        agent_z_hat = z_hat[agent_mask]
+        agent_z_hat_contrastive = z_hat_contrastive[agent_mask]
+
+        num_agent_turns = agent_mask.sum(-1).tolist()
+        doc_labels = []
+        for label, num in zip(batch["doc_labels"].tolist(), num_agent_turns):
+            doc_labels += [label] * num
 
         acc_metric.add_batch(
-            predictions=z_hat,
-            references=batch["doc_labels"],
+            predictions=agent_z_hat,
+            references=doc_labels,
         )
         contrastive_acc_metric.add_batch(
-            predictions=z_hat_contrastive,
-            references=[num_z-1]*bsz,
+            predictions=agent_z_hat_contrastive,
+            references=[num_z-1]*sum(num_agent_turns),
         )
 
     avg_loss = y_nll.item() / num_examples
@@ -316,6 +378,10 @@ def evaluate(steps, args, model, dataloader, docs, split):
                 f"{split} Contrastive Subflow Acc": z_con_acc,
             }
         )
+
+    print(avg_loss)
+    print(z_acc)
+    print(z_con_acc)
 
     return avg_loss
 
