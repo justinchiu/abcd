@@ -9,11 +9,13 @@ from subflow_data import get_abcd_dataset
 
 random.seed(1234)
 
+max_length = 64
+
 # lexical accuracy is better with lowercase
 val_dataset, processed_docs, subflow_map = get_abcd_dataset("dev", 0, 0, lower=True)
 
 # build index
-tokenized_corpus = [doc.split(" ") for doc in processed_docs]
+tokenized_corpus = [doc.split(" ")[:max_length] for doc in processed_docs]
 bm25 = BM25Okapi(tokenized_corpus)
 
 accuracy = evaluate.load("accuracy")
@@ -29,7 +31,7 @@ for e in val_dataset:
     r.remove(idx)
     distractors = random.sample(list(r), 3)
 
-    tokenized_query = xs.split()
+    tokenized_query = xs.split()[:max_length]
     scores = bm25.get_scores(tokenized_query)
     idxs = distractors + [idx]
 

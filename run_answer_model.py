@@ -39,8 +39,8 @@ set_seed(seed)
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--nolog", action="store_true")
-    parser.add_argument("--save_model", action="store_true")
-    parser.add_argument("--save_results", action="store_true")
+    parser.add_argument("--no_save_model", action="store_true")
+    parser.add_argument("--no_save_results", action="store_true")
     parser.add_argument("--num_dialogue_turns", default=0, type=int)
     parser.add_argument("--num_doc_sents", default=0, type=int)
     parser.add_argument("--max_length", default=512, type=int)
@@ -270,7 +270,7 @@ def evaluate(steps, args, model, dataloader, docs, split):
     acc_metric = load_metric("accuracy")
     contrastive_acc_metric = load_metric("accuracy")
 
-    if args.save_results and split == "Valid":
+    if not args.no_save_results and split == "Valid":
         con_preds = []
         con_golds = []
         con_docs = []
@@ -384,7 +384,7 @@ def main():
                     )
                 if valid_loss < best_valid:
                     best_valid = valid_loss
-                    if args.save_model:
+                    if not args.no_save_model:
                         answer_model.save_pretrained(
                             f"{args.output_model_dir}/{run_name}-answer"
                         )
