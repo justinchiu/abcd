@@ -44,9 +44,11 @@ agent_token = "Ġagent"
 
 def get_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--interact_data", action="store_true")
     parser.add_argument("--nolog", action="store_true")
     parser.add_argument("--no_save_model", action="store_true")
     parser.add_argument("--no_save_results", action="store_true")
+
     parser.add_argument("--num_dialogue_turns", default=0, type=int)
     parser.add_argument("--num_doc_sents", default=0, type=int)
     parser.add_argument("--max_length", default=512, type=int)
@@ -245,36 +247,57 @@ def prepare_dataloader(tokenizer, args):
     train = process_dataset(train_dataset)
     valid = process_dataset(valid_dataset)
 
-    # is this a bug in BatchSampler?
-    def collate_fn(batch):
-        return {k: v.to(device) for k, v in  batch[0].items()}
 
-    #sampler = BatchSampler(
-    #    RandomSampler(train), batch_size=args.batch_size, drop_last=False
-    #)
+    if args.interact_data:
+        con_docs, doc_preds, doc_golds = torch.load(
+            "logging/answer-model-roberta-large lr-2e-05 bs-8 "
+            "dt-0 ds-0 ml-256 k-3 hn-0|step-10000.pt"
+        )
+        con_docs = torch.cat(con_docs, 0)
+        doc_preds = torch.cat(doc_preds, 0)
+        doc_golds = torch.cat(doc_golds, 0)
+
+        cum_log_py_z = doc_preds.cumsum(-1)
+        z_hat = cum_log_py_z.argmax(1)
+        contrastive_scores = cum_log_py_z.gather(1, con_docs[:,:,None])[:,:,0]
+        z_hat_contrastive = contrastive_scores.argmax(1)
+
+        idxs = random.choices(range(len(valid)), k=20)
+        idxs = range(len(valid))
+        for idx in idxs:
+            x = valid["xs"][idx]
+            tok_x = tokenizer.tokenize(x)
+            label = doc_golds[idx].item()
+            string = []
+            for tok, doc in zip(tok_x[:64], z_hat[idx]):
+                string.append(tok.replace("Ġ", ""))
+                string.append(str(doc.item()))
+            print(" ".join(string))
+            print(idx)
+            print("Last doc prediction")
+            print(docs[doc.item()][:64])
+            print(f"Gold doc: {doc_golds[idx].item()}")
+            print(docs[label][:64])
+            if doc.item() != label:
+                import pdb; pdb.set_trace()
+
     train_dataloader = DataLoader(
         train,
         batch_size=args.batch_size,
         drop_last=False,
         shuffle=True,
-        pin_memory=True,
+        pin_memory=torch.cuda.is_available(),
         pin_memory_device=str(device),
     )
 
-    #sampler = BatchSampler(valid, batch_size=args.eval_batch_size, drop_last=False)
     valid_dataloader = DataLoader(
         valid,
         batch_size=args.eval_batch_size,
         drop_last=False,
         shuffle = False,
-        pin_memory=True,
+        pin_memory=torch.cuda.is_available(),
         pin_memory_device=str(device),
     )
-    # valid_dataloader = DataLoader(valid, sampler=sampler)
-
-    #for batch in train_dataloader:
-    #    print(batch)
-    #    pdb.set_trace()
 
     return train_dataloader, valid_dataloader, tokenized_docs
 
