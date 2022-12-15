@@ -65,7 +65,10 @@ def ranking_report(predictions, labels, use_match=False):
                 num_possible += 1
 
         rank_name = f"Recall_at_{rank}"
-        full_result[rank_name] = num_correct / num_possible
+        if num_possible > 0:
+            full_result[rank_name] = num_correct / num_possible
+        else:
+            full_result[rank_name] = 0
 
     if use_match:
         return full_result, utt_match

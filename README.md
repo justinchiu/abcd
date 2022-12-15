@@ -10,6 +10,11 @@ source scripts/jc_run.sh && baseline-oracle-intent-kb 1e-4 64
 ```
 To fix scenario.subflow: `python clean_data.py`. Produces `data/abcd_v1.2.json`.
 
+To run the baseline without oracle information, run
+```
+source scripts/jc_run.sh && baseline $lr $bsz
+```
+
 ## Introduction
 
 Whereas existing goal-oriented dialogue datasets focus mainly on identifying user intents, customer interactions in reality often involve agents following multi-step procedures derived from explicitly-defined guidelines. For example, in a online shopping scenario, a customer might request a refund for a past purchase.  However, before honoring such a request, the agent should check the company policies to see if a refund is warranted.  It is very likely that the agent will need to verify the customer's identity and check that the purchase was made within a reasonable timeframe.

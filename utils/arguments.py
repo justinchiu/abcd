@@ -71,6 +71,12 @@ def get_args():
         action="store_true",
         help="load the best saved model and run evaluation, qualify or quantify flags must be on",
     )
+    parser.add_argument(
+        "--eval-only",
+        default=False,
+        action="store_true",
+        help="only perform evaluation",
+    )
     parser.add_argument("--log-interval", default=100, type=int)
     parser.add_argument(
         "--qualify",
@@ -83,6 +89,12 @@ def get_args():
         default=False,
         action="store_true",
         help="examine the quantitative outputs of the model in reports",
+    )
+    parser.add_argument(
+        "--uptoaction",
+        default=False,
+        action="store_true",
+        help="perform evaluation up to the first action",
     )
 
     # ------- MAJOR MODEL OPTIONS --------

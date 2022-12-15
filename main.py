@@ -32,7 +32,11 @@ def run_main(args, datasets, model, exp_logger):
         kb_labels["action"] = list(model.mappings["action"].keys())
 
     # exp_logger.init_tb_writers()
-    run_train(args, datasets, model, exp_logger, kb_labels)
+    if not args.eval_only:
+        run_train(args, datasets, model, exp_logger, kb_labels)
+
+    if args.eval_only:
+        result = run_eval(args, datasets, model, exp_logger, kb_labels, split="dev")
 
     if args.do_eval:
         result = run_eval(args, datasets, model, exp_logger, kb_labels, split="test")
@@ -201,7 +205,9 @@ if __name__ == "__main__":
     )
 
     ckpt_dir, cache_results = check_directories(args)
-    raw_data = load_data(args, cache_results[1])
+    #raw_data = load_data(args, cache_results[1])
+    #raw_data = load_data(args, False)
+    raw_data = load_data(args, cache_results[1] if not args.uptoaction else False)
     tokenizer, ontology = load_tokenizer(args)
     features, mappings = process_data(
         args, tokenizer, ontology, raw_data, *cache_results
@@ -218,7 +224,9 @@ if __name__ == "__main__":
             split: CascadeDataset(args, feats) for split, feats in features.items()
         }
         model = CascadeDialogSuccess(args, mappings, ckpt_dir)
-
-    model = model.to(device)
     model.encoder.resize_token_embeddings(len(tokenizer))
+
+    if args.eval_only:
+        model.load_state_dict(torch.load(os.path.join(model.checkpoint_dir, "pytorch_model.pt")))
+    model = model.to(device)
     run_main(args, datasets, model, exp_logger)

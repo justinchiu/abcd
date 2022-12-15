@@ -403,7 +403,7 @@ class CDSProcessor(BaseProcessor):
                     speaker, text = turn["speaker"], turn["text"]
                     utterance = f"{speaker}|{text}"
 
-                    if speaker == "agent":
+                    if speaker == "agent" and not args.uptoaction:
                         context = so_far.copy()
                         support_items = (
                             turn["candidates"],
@@ -423,6 +423,10 @@ class CDSProcessor(BaseProcessor):
                             turn["turn_count"],
                         )
                         so_far.append(utterance)
+                        if args.uptoaction:
+                            # break at first action
+                            # truncates examples after p(first action|past)
+                            break
                     else:
                         so_far.append(utterance)
 
@@ -445,7 +449,9 @@ def process_data(args, tokenizer, ontology, raw_data, cache_path, from_cache):
     elif args.task == "cds":
         processor = CDSProcessor(args, tokenizer, ontology)
 
-    if from_cache:
+    if args.uptoaction:
+        features = processor.build_features(args, raw_data)
+    elif from_cache:
         features = torch.load(cache_path)
         print(f"Features loaded successfully.")
     else:
