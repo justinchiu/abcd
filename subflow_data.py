@@ -4,40 +4,13 @@ import json
 from pathlib import Path
 import torch
 
+import pdb
+
 from datasets import Dataset
 
 from utils.manual_map import flow_map, subflow_map
 
 Sentence = str
-
-
-class SubflowAbcdDataset(torch.utils.data.Dataset):
-    def __init__(self, xs, docs, doc_labels, doc_negatives, ids, subflows):
-        self.xs = xs
-        self.docs = docs
-        self.doc_labels = doc_labels
-        self.doc_negatives = doc_negatives
-        self.ids = ids
-        self.subflows = subflows
-
-    def __getitem__(self, idx):
-        item = dict()
-        item["x"] = self.xs[idx]
-        item["docs"] = self.docs
-        item["doc_label"] = self.doc_labels[idx]
-        item["doc_negatives"] = self.doc_negatives[idx]
-        item["id"] = self.ids[idx]
-        item["subflow"] = self.subflows[idx]
-
-        return item
-
-    def __len__(self):
-        return len(self.x)
-
-
-def truncate_left(seq, maxlen):
-    seqlen = len(seq)
-    return seq[seqlen - maxlen :] if seqlen > maxlen else seq
 
 
 def maybe_lower(x, lower):
@@ -54,8 +27,6 @@ def get_subflow_sentences(manual, flow, subflow, lower):
     subflow_actions = subflow_manual["actions"]
 
     if len(subflow_instructions) != 2:
-        import pdb
-
         pdb.set_trace()
 
     # use mask token for subflow embedding?
@@ -99,6 +70,7 @@ def get_abcd_dataset(
     split,
     num_dialogue_turns,
     num_doc_sents,
+    truncate_early=False,
     lower=False,
 ):
     print(f"prepare abcd {split}")
@@ -137,6 +109,14 @@ def get_abcd_dataset(
         # perform truncation
         if num_dialogue_turns > 0:
             dialogue = dialogue[:num_dialogue_turns]
+        if truncate_early:
+            # truncate right before first action
+            idx_action = -1
+            for idx, turn in enumerate(dialogue):
+                if turn.split()[0] == "action:":
+                    idx_action = idx
+                    break
+            dialogue = dialogue[:idx_action]
         dialogue = " ".join(dialogue)
 
         xs.append(dialogue)
@@ -158,7 +138,4 @@ def get_abcd_dataset(
         )
     )
     return dataset, docs, subflow_map
-    import pdb
 
-    pdb.set_trace()
-    return SubflowAbcdDataset(xs, docs, doc_labels, doc_negatives, ids, subflows)
