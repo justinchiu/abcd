@@ -162,7 +162,7 @@ def prepare_dataloader(tokenizer, args):
     tokenized_docs = tokenizer(
         docs,
         return_tensors="pt",
-        padding=True,
+        padding="max_length",
         truncation=True,
         max_length=args.max_length,
     ).to(device)
@@ -171,7 +171,7 @@ def prepare_dataloader(tokenizer, args):
         tokenized_x = tokenizer(
             example_batch["xs"],
             return_tensors="pt",
-            padding=True,
+            padding="max_length",
             truncation=True,
             max_length=args.max_length,
         )
