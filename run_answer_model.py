@@ -51,7 +51,12 @@ def get_args():
 
     parser.add_argument("--num_dialogue_turns", default=0, type=int)
     parser.add_argument("--num_doc_sents", default=0, type=int)
+
     parser.add_argument("--max_length", default=512, type=int)
+
+    parser.add_argument("--truncate_early", action="store_true",
+        help="truncate conversations right before first agent action")
+
     parser.add_argument("--num_negatives", default=0, type=int)
     parser.add_argument("--num_hard_negatives", default=0, type=int)
     parser.add_argument(
@@ -137,10 +142,10 @@ def get_args():
 
 def prepare_dataloader(tokenizer, args):
     train_dataset, docs, subflow_map = get_abcd_dataset(
-        "train", args.num_dialogue_turns, args.num_doc_sents
+        "train", args.num_dialogue_turns, args.num_doc_sents, truncate_early=args.truncate_early,
     )
     valid_dataset, _, _ = get_abcd_dataset(
-        "dev", args.num_dialogue_turns, args.num_doc_sents
+        "dev", args.num_dialogue_turns, args.num_doc_sents, truncate_early=args.truncate_early,
     )
 
     num_docs = len(docs)
@@ -434,6 +439,7 @@ def main():
         f"ml-{args.max_length} "
         f"k-{args.num_negatives} "
         f"hn-{args.num_hard_negatives}"
+        f"te-{args.truncate_early}"
     )
     args.run_name = run_name
 
