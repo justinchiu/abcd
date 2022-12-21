@@ -70,8 +70,7 @@ def get_args():
         help="truncate conversations right before first agent action. only allowed during evaluation, since it hurts during training.",
     )
 
-    parser.add_argument("--num_negatives", default=0, type=int)
-    parser.add_argument("--num_hard_negatives", default=0, type=int)
+    parser.add_argument("--num_z_samples", default=4, type=int)
     parser.add_argument(
         "--batch_size", "-b", default=1, type=int, help="batch size per gpu."
     )
@@ -242,23 +241,10 @@ def prepare_dataloader(tokenizer, args):
         doc_labels = example_batch["doc_labels"]
         doc_negatives = example_batch["doc_negatives"]
 
-        random_negatives = []
-        s = set(range(num_docs))
-        for i, (label, negs) in enumerate(zip(doc_labels, doc_negatives)):
-            this_s = s.difference(set(negs + [label]))
-            negatives = random.sample(list(this_s), args.num_negatives)
-            random_negatives.append(list(negatives))
-
-        doc_idxs = [
-            rnegs + negs + [label]
-            for rnegs, negs, label in zip(random_negatives, doc_negatives, doc_labels)
-        ]
-
         encodings = {
             "x_ids": x_ids,
             "x_mask": x_mask,
             "ids": example_batch["ids"],
-            "doc_idxs": doc_idxs,
             "doc_labels": doc_labels,
             "agent_turn_mask": agent_turn,
             "customer_turn_mask": customer_turn,
@@ -272,7 +258,6 @@ def prepare_dataloader(tokenizer, args):
             "x_ids",
             "x_mask",
             "ids",
-            "doc_idxs",
             "doc_labels",
             "agent_turn_mask",
             "customer_turn_mask",
@@ -503,8 +488,7 @@ def main():
         f"dt-{args.num_dialogue_turns} "
         f"ds-{args.num_doc_sents} "
         f"ml-{args.max_length} "
-        f"k-{args.num_negatives} "
-        f"hn-{args.num_hard_negatives}"
+        f"k-{args.num_z_samples} "
     )
     args.run_name = run_name
 
@@ -596,7 +580,7 @@ def main():
                         )
                 encoder.train()
                 answer_model.train()
-            loss, log_pz_x, log_py_z = run_model(batch, docs, encoder, answer_model)
+            loss, log_pz_x, log_py_z = run_model(batch, docs, encoder, answer_model, num_z=args.num_z_samples)
             loss.backward()
             if (
                 step % args.gradient_accumulation_steps == 0
