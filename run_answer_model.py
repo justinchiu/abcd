@@ -407,8 +407,9 @@ def evaluate(steps, args, model, dataloader, docs, split):
 
         action_mask = batch["action_turn_mask"]
         first_action_mask = action_mask.cumsum(1).cumsum(1) == 1
+        # take the prediction at last token if no action seen
+        first_action_mask[action_mask.sum(1) == 0, -1] = True
         action_z_hat = z_hat[first_action_mask]
-        nonzero_actions = action_mask.sum(1) > 0
 
         num_agent_turns = agent_mask.sum(-1).tolist()
         doc_labels = []
@@ -425,7 +426,7 @@ def evaluate(steps, args, model, dataloader, docs, split):
         )
         first_action_acc_metric.add_batch(
             predictions=action_z_hat,
-            references=batch["doc_labels"][nonzero_actions],
+            references=batch["doc_labels"],
         )
 
         if not args.no_save_results and split == "Valid":
