@@ -25,10 +25,14 @@ from rich.progress import track
 from transformers import AutoModel, AutoModelForSeq2SeqLM
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 from transformers import set_seed
+
 import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch import nn
+
+from torch.distributions.kl import kl_divergence
+from torch.distributions import Categorical
 
 from eba_utils import prepare_optim_and_scheduler
 
@@ -95,7 +99,7 @@ def get_args():
     )
     parser.add_argument(
         "--model_dir",
-        default="roberta-large",
+        default="roberta-base",
         type=str,
         help="The directory where the pretrained model will be loaded.",
     )
@@ -201,7 +205,8 @@ def prepare_dataloader(tokenizer, args):
         )
         x_ids = tokenized_x.input_ids
         x_mask = tokenized_x.attention_mask
-        x_ids[x_ids == padding_id] = -100
+        #x_ids[x_ids == padding_id] = -100
+        # the -100 is for NLLCriterion
 
         # GET TURN INDICES
         # True if conversation starts with agent
@@ -333,24 +338,43 @@ def prepare_dataloader(tokenizer, args):
     return train_dataloader, valid_dataloader, tokenized_docs
 
 
-def run_model(batch, docs, model):
+def run_model(batch, docs, encoder, model, num_z=4):
     x_ids = batch["x_ids"].to(device)
     x_mask = batch["x_mask"].to(device)
-    z_idxs = batch["doc_idxs"].to(device)
-
-    bsz, x_len = x_ids.shape
+    z_labels = batch["doc_labels"].to(device)
 
     z_ids = docs.input_ids
     z_mask = docs.attention_mask
 
-    bsz, num_z = z_idxs.shape
     total_num_z, z_len = z_ids.shape
+    bsz, x_len = x_ids.shape
 
-    z = z_ids[z_idxs]
-    mask = z_mask[z_idxs]
+    # encoder and log p(z|x)
+    x_out = encoder(input_ids=x_ids, attention_mask=x_mask)
+    z_out = encoder(input_ids=z_ids, attention_mask=z_mask)
+
+    score_z_x = torch.einsum("xh,zh->xz", x_out.pooler_output, z_out.pooler_output)
+    log_pz_x = (score_z_x / 32).log_softmax(-1)
+
+    neg_log_pz = -log_pz_x[torch.arange(bsz), z_labels].mean()
+
+    # answer log p(y|x,z)
+
+    # subsample docs
+    if num_z < total_num_z:
+        topk_z = log_pz_x.topk(num_z, -1)
+        sampled_log_pz_x, z_idxs = topk_z
+        # TODO: add sample without replacement
+        z = z_ids[z_idxs]
+        mask = z_mask[z_idxs]
+    else:
+        sampled_log_pz_x = log_pz_x
+        z = z_ids[None].repeat(bsz, 1, 1)
+        mask = z_mask[None].repeat(bsz, 1, 1)
 
     labels = (
-        x_ids[:, None].expand(bsz, num_z, x_len).contiguous().view(bsz * num_z, x_len)
+        #x_ids[:, None].expand(bsz, num_z, x_len).contiguous().view(bsz * num_z, x_len)
+        x_ids[:, None].repeat(1, num_z, 1).view(bsz * num_z, x_len)
     )
 
     out = model(
@@ -365,15 +389,28 @@ def run_model(batch, docs, model):
     )
     tok_loss[~x_mask.bool()[:, None].expand(bsz, num_z, T)] = 0
     log_py_z = tok_loss.sum(-1)
-    neg_log_py = -log_py_z.logsumexp(-1).mean()
-    return neg_log_py, tok_loss
+    log_py = log_py_z.logsumexp(-1)
+    neg_log_py = -log_py.mean()
+
+    #return neg_log_py, tok_loss
+
+    reconstruction = (sampled_log_pz_x.exp() * log_py_z).sum(-1)
+    # KL has better scaling than entropy, since subtracts uniform entropy
+    posterior_prior_kl = kl_divergence(Categorical(logits=log_pz_x), Categorical(logits=torch.zeros_like(log_pz_x)))
+    #posterior_prior_kl = Categorical(logits=log_pz_x).entropy()
+    elbo = (reconstruction - posterior_prior_kl).mean()
+
+    return elbo, log_pz_x, tok_loss
 
 
-def evaluate(steps, args, model, dataloader, docs, split):
+def evaluate(steps, args, encoder, model, dataloader, docs, split):
     y_nll = 0
     num_examples = 0
+
+    # evaluate encoder and intent model later
+
+    # answer model
     acc_metric = load_metric("accuracy")
-    contrastive_acc_metric = load_metric("accuracy")
     first_action_acc_metric = load_metric("accuracy")
 
     if not args.no_save_results and split == "Valid":
@@ -385,11 +422,9 @@ def evaluate(steps, args, model, dataloader, docs, split):
     z_idxs = torch.arange(num_docs, device=device, dtype=torch.int64)
     #for step, batch in enumerate(dataloader):
     for step, batch in track(enumerate(dataloader), total=len(dataloader)):
-        doc_idxs = batch["doc_idxs"].to(device)
-        bsz, num_z = doc_idxs.shape
+        bsz = batch["x_ids"].shape[0]
 
-        batch["doc_idxs"] = z_idxs[None].expand(bsz, num_docs)
-        loss, log_py_z = run_model(batch, docs, model)
+        loss, log_pz_x, log_py_z = run_model(batch, docs, encoder, model, num_z=num_docs)
 
         y_nll += loss * bsz
         num_examples += bsz
@@ -397,13 +432,10 @@ def evaluate(steps, args, model, dataloader, docs, split):
         # log_py_z: bsz x num_z x time
         cum_log_py_z = log_py_z.cumsum(-1)
         z_hat = cum_log_py_z.argmax(1)
-        contrastive_scores = cum_log_py_z[torch.arange(bsz)[:, None], doc_idxs]
-        z_hat_contrastive = contrastive_scores.argmax(1)
 
         # index into start of agent turns
         agent_mask = batch["agent_turn_mask"]
         agent_z_hat = z_hat[agent_mask]
-        agent_z_hat_contrastive = z_hat_contrastive[agent_mask]
 
         action_mask = batch["action_turn_mask"]
         first_action_mask = action_mask.cumsum(1).cumsum(1) == 1
@@ -420,23 +452,17 @@ def evaluate(steps, args, model, dataloader, docs, split):
             predictions=agent_z_hat,
             references=doc_labels,
         )
-        contrastive_acc_metric.add_batch(
-            predictions=agent_z_hat_contrastive,
-            references=[num_z - 1] * sum(num_agent_turns),
-        )
         first_action_acc_metric.add_batch(
             predictions=action_z_hat,
             references=batch["doc_labels"],
         )
 
         if not args.no_save_results and split == "Valid":
-            con_docs.append(doc_idxs.cpu())
             doc_preds.append(cum_log_py_z.cpu())
             doc_golds.append(batch["doc_labels"].cpu())
 
     avg_loss = y_nll.item() / num_examples
     z_acc = acc_metric.compute()
-    z_con_acc = contrastive_acc_metric.compute()
     z_first_action_acc = first_action_acc_metric.compute()
 
     if not args.nolog:
@@ -446,26 +472,19 @@ def evaluate(steps, args, model, dataloader, docs, split):
                 f"{split} Answer NLL": avg_loss,
                 f"{split} Subflow Acc": z_acc,
                 f"{split} Subflow First action Acc": z_first_action_acc,
-                f"{split} Contrastive Subflow Acc": z_con_acc,
             }
         )
     if not args.no_save_results and split == "Valid":
         torch.save(
             (
-                con_docs,
                 doc_preds,
                 doc_golds,
             ),
             f"logging/{args.run_name}|step-{steps}.pt",
         )
 
-    print("average loss")
     print(avg_loss)
-    print("z acc")
     print(z_acc)
-    print("z contrastive acc")
-    print(z_con_acc)
-    print("z first action acc")
     print(z_first_action_acc)
 
     return avg_loss
@@ -475,9 +494,10 @@ def main():
     args = get_args()
     answer_tokenizer = AutoTokenizer.from_pretrained(args.answer_model_dir)
 
-    model_name = args.answer_model_dir.split("/")[-1]
+    encoder_name = args.model_dir.split("/")[-1]
+    answer_model_name = args.answer_model_dir.split("/")[-1]
     run_name = (
-        f"answer-model-{args.prefix}-{model_name} "
+        f"encoder-answer-model-{args.prefix}-{encoder_name}-{answer_model_name} "
         f"lr-{args.learning_rate} "
         f"bs-{args.batch_size*args.gradient_accumulation_steps} "
         f"dt-{args.num_dialogue_turns} "
@@ -487,6 +507,9 @@ def main():
         f"hn-{args.num_hard_negatives}"
     )
     args.run_name = run_name
+
+    encoder = AutoModel.from_pretrained(args.model_dir)
+    encoder = encoder.to(device)
 
     # answer_model_dir = args.answer_model_dir if not load_answer else load_answer
     # answer_model = AutoModelForSeq2SeqLM.from_pretrained(answer_model_dir)
@@ -515,6 +538,11 @@ def main():
         args.nolog = True
         completed_steps = -1
 
+        # load models
+        savepath = f"{args.output_model_dir}/{run_name}-encoder"
+        encoder = AutoModelForSeq2SeqLM.from_pretrained(savepath)
+        encoder = encoder.to(device)
+
         savepath = f"{args.output_model_dir}/{run_name}-answer"
         answer_model = AutoModelForSeq2SeqLM.from_pretrained(savepath)
         answer_model.to(device)
@@ -523,6 +551,7 @@ def main():
             valid_loss = evaluate(
                 steps=completed_steps,
                 args=args,
+                encoder=encoder,
                 model=answer_model,
                 docs=docs,
                 dataloader=eval_dataloader,
@@ -535,6 +564,7 @@ def main():
 
     # best_valid = float("-inf")
     best_valid = float("inf")
+    encoder.train()
     answer_model.train()
     for epoch in range(args.epoch):
         for step, batch in enumerate(train_dataloader):
@@ -543,11 +573,13 @@ def main():
                 and completed_steps > 0
                 and step % args.gradient_accumulation_steps == 0
             ):
+                encoder.eval()
                 answer_model.eval()
                 with torch.no_grad():
                     valid_loss = evaluate(
                         steps=completed_steps,
                         args=args,
+                        encoder=encoder,
                         model=answer_model,
                         docs=docs,
                         dataloader=eval_dataloader,
@@ -556,11 +588,15 @@ def main():
                 if valid_loss < best_valid:
                     best_valid = valid_loss
                     if not args.no_save_model:
+                        encoder.save_pretrained(
+                            f"{args.output_model_dir}/{run_name}-encoder"
+                        )
                         answer_model.save_pretrained(
                             f"{args.output_model_dir}/{run_name}-answer"
                         )
+                encoder.train()
                 answer_model.train()
-            loss, _ = run_model(batch, docs, answer_model)
+            loss, log_pz_x, log_py_z = run_model(batch, docs, encoder, answer_model)
             loss.backward()
             if (
                 step % args.gradient_accumulation_steps == 0
