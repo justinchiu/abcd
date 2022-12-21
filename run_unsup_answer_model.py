@@ -385,7 +385,7 @@ def run_model(batch, docs, encoder, model, num_z=4):
     #posterior_prior_kl = Categorical(logits=log_pz_x).entropy()
     elbo = (reconstruction - posterior_prior_kl).mean()
 
-    return elbo, log_pz_x, tok_loss
+    return -elbo, log_pz_x, tok_loss
 
 
 def evaluate(steps, args, encoder, model, dataloader, docs, split):

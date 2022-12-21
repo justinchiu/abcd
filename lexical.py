@@ -9,9 +9,14 @@ from subflow_data import get_abcd_dataset
 
 random.seed(1234)
 
-max_length = 64
+max_length = 256
+max_length = None
 
 # lexical accuracy is better with lowercase
+val_dataset, processed_docs, subflow_map = get_abcd_dataset(
+    "dev", 0, 0, lower=True, truncate_early=True
+)
+"""
 val_dataset, processed_docs, subflow_map = get_abcd_dataset(
     "dev", 0, 0, lower=True, truncate_early=True
 )
@@ -21,6 +26,7 @@ val_dataset, processed_docs, subflow_map = get_abcd_dataset(
     "dev", 0, 2, lower=True, truncate_early=True
 )
 # first two sentences does best
+"""
 
 # build index
 tokenized_corpus = [doc.split(" ")[:max_length] for doc in processed_docs]
