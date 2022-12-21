@@ -149,16 +149,18 @@ def prepare_dataloader(tokenizer, args):
     padding_id = tokenizer.pad_token_id
 
     (
-        start_customer_id, customer_id,
-        start_agent_id, agent_id,
-    ) = tokenizer.convert_tokens_to_ids([
-        start_customer_token, customer_token, start_agent_token, agent_token
-    ])
+        start_customer_id,
+        customer_id,
+        start_agent_id,
+        agent_id,
+    ) = tokenizer.convert_tokens_to_ids(
+        [start_customer_token, customer_token, start_agent_token, agent_token]
+    )
 
     tokenized_docs = tokenizer(
         docs,
         return_tensors="pt",
-        #padding=True,
+        # padding=True,
         padding="max_length",
         truncation=True,
         max_length=args.max_length,
@@ -168,7 +170,7 @@ def prepare_dataloader(tokenizer, args):
         tokenized_x = tokenizer(
             example_batch["xs"],
             return_tensors="pt",
-            #padding=True,
+            # padding=True,
             padding="max_length",
             truncation=True,
             max_length=args.max_length,
@@ -176,7 +178,7 @@ def prepare_dataloader(tokenizer, args):
         x_ids = tokenized_x.input_ids
         x_mask = tokenized_x.attention_mask
         # only for generation.
-        #x_ids[x_ids == padding_id] = -100
+        # x_ids[x_ids == padding_id] = -100
 
         doc_labels = example_batch["doc_labels"]
 
@@ -214,7 +216,7 @@ def prepare_dataloader(tokenizer, args):
 
         cum_log_py_z = doc_preds.cumsum(-1)
         z_hat = cum_log_py_z.argmax(1)
-        contrastive_scores = cum_log_py_z.gather(1, con_docs[:,:,None])[:,:,0]
+        contrastive_scores = cum_log_py_z.gather(1, con_docs[:, :, None])[:, :, 0]
         z_hat_contrastive = contrastive_scores.argmax(1)
 
         idxs = random.choices(range(len(valid)), k=20)
@@ -234,7 +236,9 @@ def prepare_dataloader(tokenizer, args):
             print(f"Gold doc: {doc_golds[idx].item()}")
             print(docs[label][:64])
             if doc.item() != label:
-                import pdb; pdb.set_trace()
+                import pdb
+
+                pdb.set_trace()
 
     train_dataloader = DataLoader(
         train,
@@ -249,7 +253,7 @@ def prepare_dataloader(tokenizer, args):
         valid,
         batch_size=args.eval_batch_size,
         drop_last=False,
-        shuffle = False,
+        shuffle=False,
         pin_memory=torch.cuda.is_available(),
         pin_memory_device=str(device),
     )
@@ -282,6 +286,7 @@ def run_model(batch, docs, model):
 
     return loss, log_pz_x
 
+
 def evaluate(steps, args, model, dataloader, docs, split):
     nll = 0
     num_examples = 0
@@ -291,10 +296,9 @@ def evaluate(steps, args, model, dataloader, docs, split):
         doc_preds = []
         doc_golds = []
 
-
     num_docs = docs.input_ids.shape[0]
     z_idxs = torch.arange(num_docs, device=device, dtype=torch.int64)
-    #for step, batch in enumerate(dataloader):
+    # for step, batch in enumerate(dataloader):
     for step, batch in track(enumerate(dataloader), total=len(dataloader)):
         loss, log_py_z = run_model(batch, docs, model)
 
@@ -380,7 +384,7 @@ def main():
         wandb.config.lr = args.learning_rate
         wandb.watch(model)
 
-    #best_valid = float("-inf")
+    # best_valid = float("-inf")
     best_valid = float("inf")
     model.train()
     for epoch in range(args.epoch):

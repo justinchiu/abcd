@@ -205,8 +205,8 @@ if __name__ == "__main__":
     )
 
     ckpt_dir, cache_results = check_directories(args)
-    #raw_data = load_data(args, cache_results[1])
-    #raw_data = load_data(args, False)
+    # raw_data = load_data(args, cache_results[1])
+    # raw_data = load_data(args, False)
     raw_data = load_data(args, cache_results[1] if not args.uptoaction else False)
     tokenizer, ontology = load_tokenizer(args)
     features, mappings = process_data(
@@ -227,6 +227,8 @@ if __name__ == "__main__":
     model.encoder.resize_token_embeddings(len(tokenizer))
 
     if args.eval_only:
-        model.load_state_dict(torch.load(os.path.join(model.checkpoint_dir, "pytorch_model.pt")))
+        model.load_state_dict(
+            torch.load(os.path.join(model.checkpoint_dir, "pytorch_model.pt"))
+        )
     model = model.to(device)
     run_main(args, datasets, model, exp_logger)

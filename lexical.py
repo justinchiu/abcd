@@ -12,10 +12,14 @@ random.seed(1234)
 max_length = 64
 
 # lexical accuracy is better with lowercase
-val_dataset, processed_docs, subflow_map = get_abcd_dataset("dev", 0, 0, lower=True, truncate_early=True)
-#val_dataset, processed_docs, subflow_map = get_abcd_dataset("dev", 0, 1, lower=True, truncate_early=True)
+val_dataset, processed_docs, subflow_map = get_abcd_dataset(
+    "dev", 0, 0, lower=True, truncate_early=True
+)
+# val_dataset, processed_docs, subflow_map = get_abcd_dataset("dev", 0, 1, lower=True, truncate_early=True)
 # first sentence of doc only does worse.
-val_dataset, processed_docs, subflow_map = get_abcd_dataset("dev", 0, 2, lower=True, truncate_early=True)
+val_dataset, processed_docs, subflow_map = get_abcd_dataset(
+    "dev", 0, 2, lower=True, truncate_early=True
+)
 # first two sentences does best
 
 # build index
@@ -27,7 +31,7 @@ contrastive_accuracy = evaluate.load("accuracy")
 for e in val_dataset:
     xs = e["xs"]
     subflow = e["subflows"]
-    #idx = get_index[subflow]
+    # idx = get_index[subflow]
     idx = subflow_map[subflow]
 
     # sample without replacement without idx

@@ -9,6 +9,7 @@ import wandb
 import numpy as np
 import random
 import wandb
+import sys
 
 import pdb
 
@@ -40,11 +41,16 @@ start_customer_token = "custom"
 customer_token = "Ġcustomer"
 start_agent_token = "agent"
 agent_token = "Ġagent"
+action_token = "Ġaction"
 
 
 def get_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--prefix", default="1220", help="date")
+
     parser.add_argument("--interact_data", action="store_true")
+    parser.add_argument("--eval_only", action="store_true")
+
     parser.add_argument("--nolog", action="store_true")
     parser.add_argument("--no_save_model", action="store_true")
     parser.add_argument("--no_save_results", action="store_true")
@@ -54,8 +60,11 @@ def get_args():
 
     parser.add_argument("--max_length", default=512, type=int)
 
-    parser.add_argument("--truncate_early", action="store_true",
-        help="truncate conversations right before first agent action")
+    parser.add_argument(
+        "--truncate_early",
+        action="store_true",
+        help="truncate conversations right before first agent action. only allowed during evaluation, since it hurts during training.",
+    )
 
     parser.add_argument("--num_negatives", default=0, type=int)
     parser.add_argument("--num_hard_negatives", default=0, type=int)
@@ -142,10 +151,16 @@ def get_args():
 
 def prepare_dataloader(tokenizer, args):
     train_dataset, docs, subflow_map = get_abcd_dataset(
-        "train", args.num_dialogue_turns, args.num_doc_sents, truncate_early=args.truncate_early,
+        "train",
+        args.num_dialogue_turns,
+        args.num_doc_sents,
+        truncate_early=args.truncate_early,
     )
     valid_dataset, _, _ = get_abcd_dataset(
-        "dev", args.num_dialogue_turns, args.num_doc_sents, truncate_early=args.truncate_early,
+        "dev",
+        args.num_dialogue_turns,
+        args.num_doc_sents,
+        truncate_early=args.truncate_early,
     )
 
     num_docs = len(docs)
@@ -153,11 +168,20 @@ def prepare_dataloader(tokenizer, args):
     padding_id = tokenizer.pad_token_id
 
     (
-        start_customer_id, customer_id,
-        start_agent_id, agent_id,
-    ) = tokenizer.convert_tokens_to_ids([
-        start_customer_token, customer_token, start_agent_token, agent_token
-    ])
+        start_customer_id,
+        customer_id,
+        start_agent_id,
+        agent_id,
+        action_id,
+    ) = tokenizer.convert_tokens_to_ids(
+        [
+            start_customer_token,
+            customer_token,
+            start_agent_token,
+            agent_token,
+            action_token,
+        ]
+    )
 
     tokenized_docs = tokenizer(
         docs,
@@ -182,7 +206,7 @@ def prepare_dataloader(tokenizer, args):
         # GET TURN INDICES
         # True if conversation starts with agent
         # first token is bos <s>
-        agent_start = x_ids[:,1] == start_agent_id
+        agent_start = x_ids[:, 1] == start_agent_id
 
         # make sure all start-of-turn tokens have a trailing comma,
         # "Gagent:" and "Gcustomer:"
@@ -191,17 +215,18 @@ def prepare_dataloader(tokenizer, args):
         # eg "welcome to customer service".
         colon_id = tokenizer.convert_tokens_to_ids(":")
         is_next_token_colon = torch.zeros_like(x_ids, dtype=bool)
-        is_next_token_colon[:,:-1] = x_ids[:,1:] == colon_id
+        is_next_token_colon[:, :-1] = x_ids[:, 1:] == colon_id
 
         customer_turn = (x_ids == customer_id) & is_next_token_colon
         agent_turn = (x_ids == agent_id) & is_next_token_colon
-        agent_turn[:,1] = agent_start
-        customer_turn[:,1] = ~agent_start
-        turn_locations = customer_turn | agent_turn
+        agent_turn[:, 1] = agent_start
+        customer_turn[:, 1] = ~agent_start
+        action_turn = (x_ids == action_id) & is_next_token_colon
+        turn_locations = customer_turn | agent_turn | action_turn
 
         if False:
             # DBG
-            next_token_id = x_ids[:,1:]
+            next_token_id = x_ids[:, 1:]
             not_agent_token = (x_ids == agent_id) & ~is_next_token_colon
             not_customer_token = (x_ids == customer_id) & ~is_next_token_colon
 
@@ -232,6 +257,7 @@ def prepare_dataloader(tokenizer, args):
             "doc_labels": doc_labels,
             "agent_turn_mask": agent_turn,
             "customer_turn_mask": customer_turn,
+            "action_turn_mask": action_turn,
         }
         return encodings
 
@@ -245,13 +271,13 @@ def prepare_dataloader(tokenizer, args):
             "doc_labels",
             "agent_turn_mask",
             "customer_turn_mask",
+            "action_turn_mask",
         ]
         dataset.set_format(type="torch", columns=columns, output_all_columns=False)
         return dataset
 
     train = process_dataset(train_dataset)
     valid = process_dataset(valid_dataset)
-
 
     if args.interact_data:
         con_docs, doc_preds, doc_golds = torch.load(
@@ -264,7 +290,7 @@ def prepare_dataloader(tokenizer, args):
 
         cum_log_py_z = doc_preds.cumsum(-1)
         z_hat = cum_log_py_z.argmax(1)
-        contrastive_scores = cum_log_py_z.gather(1, con_docs[:,:,None])[:,:,0]
+        contrastive_scores = cum_log_py_z.gather(1, con_docs[:, :, None])[:, :, 0]
         z_hat_contrastive = contrastive_scores.argmax(1)
 
         idxs = random.choices(range(len(valid)), k=20)
@@ -284,7 +310,7 @@ def prepare_dataloader(tokenizer, args):
             print(f"Gold doc: {doc_golds[idx].item()}")
             print(docs[label][:64])
             if doc.item() != label:
-                import pdb; pdb.set_trace()
+                pdb.set_trace()
 
     train_dataloader = DataLoader(
         train,
@@ -299,7 +325,7 @@ def prepare_dataloader(tokenizer, args):
         valid,
         batch_size=args.eval_batch_size,
         drop_last=False,
-        shuffle = False,
+        shuffle=False,
         pin_memory=torch.cuda.is_available(),
         pin_memory_device=str(device),
     )
@@ -323,34 +349,37 @@ def run_model(batch, docs, model):
     z = z_ids[z_idxs]
     mask = z_mask[z_idxs]
 
-    labels = x_ids[:,None].expand(bsz,num_z,x_len).contiguous().view(bsz*num_z, x_len)
+    labels = (
+        x_ids[:, None].expand(bsz, num_z, x_len).contiguous().view(bsz * num_z, x_len)
+    )
 
     out = model(
-        input_ids = z.view(bsz*num_z, z_len),
-        attention_mask = mask.view(bsz*num_z, z_len),
-        labels = labels,
+        input_ids=z.view(bsz * num_z, z_len),
+        attention_mask=mask.view(bsz * num_z, z_len),
+        labels=labels,
     )
     logits = out.logits.log_softmax(-1)
     N, T, V = logits.shape
     tok_loss = logits[torch.arange(N)[:, None], torch.arange(T), labels].view(
         bsz, num_z, T
     )
-    tok_loss[~x_mask.bool()[:,None].expand(bsz, num_z, T)] = 0
+    tok_loss[~x_mask.bool()[:, None].expand(bsz, num_z, T)] = 0
     log_py_z = tok_loss.sum(-1)
     neg_log_py = -log_py_z.logsumexp(-1).mean()
     return neg_log_py, tok_loss
+
 
 def evaluate(steps, args, model, dataloader, docs, split):
     y_nll = 0
     num_examples = 0
     acc_metric = load_metric("accuracy")
     contrastive_acc_metric = load_metric("accuracy")
+    first_action_acc_metric = load_metric("accuracy")
 
     if not args.no_save_results and split == "Valid":
         con_docs = []
         doc_preds = []
         doc_golds = []
-
 
     num_docs = docs.input_ids.shape[0]
     z_idxs = torch.arange(num_docs, device=device, dtype=torch.int64)
@@ -368,13 +397,18 @@ def evaluate(steps, args, model, dataloader, docs, split):
         # log_py_z: bsz x num_z x time
         cum_log_py_z = log_py_z.cumsum(-1)
         z_hat = cum_log_py_z.argmax(1)
-        contrastive_scores = cum_log_py_z[torch.arange(bsz)[:,None], doc_idxs]
+        contrastive_scores = cum_log_py_z[torch.arange(bsz)[:, None], doc_idxs]
         z_hat_contrastive = contrastive_scores.argmax(1)
 
         # index into start of agent turns
         agent_mask = batch["agent_turn_mask"]
         agent_z_hat = z_hat[agent_mask]
         agent_z_hat_contrastive = z_hat_contrastive[agent_mask]
+
+        action_mask = batch["action_turn_mask"]
+        first_action_mask = action_mask.cumsum(1).cumsum(1) == 1
+        action_z_hat = z_hat[first_action_mask]
+        nonzero_actions = action_mask.sum(1) > 0
 
         num_agent_turns = agent_mask.sum(-1).tolist()
         doc_labels = []
@@ -387,7 +421,11 @@ def evaluate(steps, args, model, dataloader, docs, split):
         )
         contrastive_acc_metric.add_batch(
             predictions=agent_z_hat_contrastive,
-            references=[num_z-1]*sum(num_agent_turns),
+            references=[num_z - 1] * sum(num_agent_turns),
+        )
+        first_action_acc_metric.add_batch(
+            predictions=action_z_hat,
+            references=batch["doc_labels"][nonzero_actions],
         )
 
         if not args.no_save_results and split == "Valid":
@@ -398,6 +436,7 @@ def evaluate(steps, args, model, dataloader, docs, split):
     avg_loss = y_nll.item() / num_examples
     z_acc = acc_metric.compute()
     z_con_acc = contrastive_acc_metric.compute()
+    z_first_action_acc = first_action_acc_metric.compute()
 
     if not args.nolog:
         wandb.log(
@@ -405,6 +444,7 @@ def evaluate(steps, args, model, dataloader, docs, split):
                 "step": steps,
                 f"{split} Answer NLL": avg_loss,
                 f"{split} Subflow Acc": z_acc,
+                f"{split} Subflow First action Acc": z_first_action_acc,
                 f"{split} Contrastive Subflow Acc": z_con_acc,
             }
         )
@@ -421,6 +461,7 @@ def evaluate(steps, args, model, dataloader, docs, split):
     print(avg_loss)
     print(z_acc)
     print(z_con_acc)
+    print(z_first_action_acc)
 
     return avg_loss
 
@@ -429,9 +470,9 @@ def main():
     args = get_args()
     answer_tokenizer = AutoTokenizer.from_pretrained(args.answer_model_dir)
 
-    model_name = args.model_dir.split("/")[-1]
+    model_name = args.answer_model_dir.split("/")[-1]
     run_name = (
-        f"answer-model-{model_name} "
+        f"answer-model-{args.prefix}-{model_name} "
         f"lr-{args.learning_rate} "
         f"bs-{args.batch_size*args.gradient_accumulation_steps} "
         f"dt-{args.num_dialogue_turns} "
@@ -439,7 +480,6 @@ def main():
         f"ml-{args.max_length} "
         f"k-{args.num_negatives} "
         f"hn-{args.num_hard_negatives}"
-        f"te-{args.truncate_early}"
     )
     args.run_name = run_name
 
@@ -460,15 +500,35 @@ def main():
     total_batch_size = args.batch_size * args.gradient_accumulation_steps
     optim, lr_scheduler = prepare_optim_and_scheduler([answer_model], args)
 
-    progress_bar = tqdm(range(args.max_train_steps))
-    completed_steps = 0
-
     if not args.nolog:
         wandb.init(name=run_name, project="abcd_unsup_subflow", tags=["abcd"])
         wandb.config.lr = args.learning_rate
         wandb.watch(answer_model)
 
-    #best_valid = float("-inf")
+    if args.eval_only:
+        args.no_save_model = True
+        args.nolog = True
+        completed_steps = -1
+
+        savepath = f"{args.output_model_dir}/{run_name}-answer"
+        answer_model = AutoModelForSeq2SeqLM.from_pretrained(savepath)
+        answer_model.to(device)
+
+        with torch.no_grad():
+            valid_loss = evaluate(
+                steps=completed_steps,
+                args=args,
+                model=answer_model,
+                docs=docs,
+                dataloader=eval_dataloader,
+                split="Valid",
+            )
+        sys.exit()
+
+    progress_bar = tqdm(range(args.max_train_steps))
+    completed_steps = 0
+
+    # best_valid = float("-inf")
     best_valid = float("inf")
     answer_model.train()
     for epoch in range(args.epoch):
