@@ -343,7 +343,6 @@ def evaluate(steps, args, model, dataloader, docs, split):
     y_nll = 0
     num_examples = 0
     acc_metric = load_metric("accuracy")
-    contrastive_acc_metric = load_metric("accuracy")
     first_action_acc_metric = load_metric("accuracy")
 
     if not args.no_save_results and split == "Valid":
@@ -352,13 +351,11 @@ def evaluate(steps, args, model, dataloader, docs, split):
         doc_golds = []
 
     num_docs = docs.input_ids.shape[0]
-    z_idxs = torch.arange(num_docs, device=device, dtype=torch.int64)
     # for step, batch in enumerate(dataloader):
     for step, batch in track(enumerate(dataloader), total=len(dataloader)):
-        doc_idxs = batch["doc_idxs"].to(device)
-        bsz, num_z = doc_idxs.shape
+        bsz = batch["x_ids"].shape[0]
+        num_z = num_docs
 
-        batch["doc_idxs"] = z_idxs[None].expand(bsz, num_docs)
         loss, log_py_z = run_model(batch, docs, model)
 
         y_nll += loss * bsz
@@ -367,13 +364,10 @@ def evaluate(steps, args, model, dataloader, docs, split):
         # log_py_z: bsz x num_z x time
         cum_log_py_z = log_py_z.cumsum(-1)
         z_hat = cum_log_py_z.argmax(1)
-        contrastive_scores = cum_log_py_z[torch.arange(bsz)[:, None], doc_idxs]
-        z_hat_contrastive = contrastive_scores.argmax(1)
 
         # index into start of agent turns
         agent_mask = batch["agent_turn_mask"]
         agent_z_hat = z_hat[agent_mask]
-        agent_z_hat_contrastive = z_hat_contrastive[agent_mask]
 
         action_mask = batch["action_turn_mask"]
         first_action_mask = action_mask.cumsum(1).cumsum(1) == 1
@@ -390,23 +384,17 @@ def evaluate(steps, args, model, dataloader, docs, split):
             predictions=agent_z_hat,
             references=doc_labels,
         )
-        contrastive_acc_metric.add_batch(
-            predictions=agent_z_hat_contrastive,
-            references=[num_z - 1] * sum(num_agent_turns),
-        )
         first_action_acc_metric.add_batch(
             predictions=action_z_hat,
             references=batch["doc_labels"],
         )
 
         if not args.no_save_results and split == "Valid":
-            con_docs.append(doc_idxs.cpu())
             doc_preds.append(log_py_z.cpu())
             doc_golds.append(batch["doc_labels"].cpu())
 
     avg_loss = y_nll.item() / num_examples
     z_acc = acc_metric.compute()
-    z_con_acc = contrastive_acc_metric.compute()
     z_first_action_acc = first_action_acc_metric.compute()
 
     if not args.nolog:
@@ -416,13 +404,11 @@ def evaluate(steps, args, model, dataloader, docs, split):
                 f"{split} Answer NLL": avg_loss,
                 f"{split} Subflow Acc": z_acc,
                 f"{split} Subflow First action Acc": z_first_action_acc,
-                f"{split} Contrastive Subflow Acc": z_con_acc,
             }
         )
     if not args.no_save_results and split == "Valid":
         torch.save(
             (
-                con_docs,
                 doc_preds,
                 doc_golds,
             ),
@@ -433,8 +419,6 @@ def evaluate(steps, args, model, dataloader, docs, split):
     print(avg_loss)
     print("z acc")
     print(z_acc)
-    print("z contrastive acc")
-    print(z_con_acc)
     print("z first action acc")
     print(z_first_action_acc)
 
