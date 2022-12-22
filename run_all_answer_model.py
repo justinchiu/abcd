@@ -13,7 +13,7 @@ import sys
 
 import pdb
 
-from evaluate import load
+from datasets import load_metric
 from torch.utils.data.sampler import BatchSampler, RandomSampler
 
 
@@ -25,14 +25,10 @@ from rich.progress import track
 from transformers import AutoModel, AutoModelForSeq2SeqLM
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 from transformers import set_seed
-
 import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch import nn
-
-from torch.distributions.kl import kl_divergence
-from torch.distributions import Categorical
 
 from eba_utils import prepare_optim_and_scheduler
 
@@ -50,13 +46,10 @@ action_token = "Ġaction"
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--prefix", default="1220", help="date")
+    parser.add_argument("--prefix", default="1222", help="date")
 
     parser.add_argument("--interact_data", action="store_true")
     parser.add_argument("--eval_only", action="store_true")
-
-    parser.add_argument("--true_z", action="store_true")
-    parser.add_argument("--kl_weight", default=1.0, type=float)
 
     parser.add_argument("--nolog", action="store_true")
     parser.add_argument("--no_save_model", action="store_true")
@@ -73,7 +66,6 @@ def get_args():
         help="truncate conversations right before first agent action. only allowed during evaluation, since it hurts during training.",
     )
 
-    parser.add_argument("--num_z_samples", default=4, type=int)
     parser.add_argument(
         "--batch_size", "-b", default=1, type=int, help="batch size per gpu."
     )
@@ -87,17 +79,10 @@ def get_args():
         help="number of steps between each evaluation.",
     )
     parser.add_argument(
-        "--supervised_examples",
-        default=0,
+        "--full_eval_steps",
+        default=50000,
         type=int,
-        help="number of fully supervised training examples for q(z|x) and p(x|z). "
-        "this should be as small as possible",
-    )
-    parser.add_argument(
-        "--q_warmup_steps",
-        default=0,
-        type=int,
-        help="number of q warmup steps",
+        help="number of steps between each FULL/expensive evaluation.",
     )
     parser.add_argument(
         "--epoch",
@@ -108,7 +93,7 @@ def get_args():
     )
     parser.add_argument(
         "--model_dir",
-        default="roberta-base",
+        default="roberta-large",
         type=str,
         help="The directory where the pretrained model will be loaded.",
     )
@@ -214,8 +199,7 @@ def prepare_dataloader(tokenizer, args):
         )
         x_ids = tokenized_x.input_ids
         x_mask = tokenized_x.attention_mask
-        # x_ids[x_ids == padding_id] = -100
-        # the -100 is for NLLCriterion
+        x_ids[x_ids == padding_id] = -100
 
         # GET TURN INDICES
         # True if conversation starts with agent
@@ -238,23 +222,11 @@ def prepare_dataloader(tokenizer, args):
         action_turn = (x_ids == action_id) & is_next_token_colon
         turn_locations = customer_turn | agent_turn | action_turn
 
-        if False:
-            # DBG
-            next_token_id = x_ids[:, 1:]
-            not_agent_token = (x_ids == agent_id) & ~is_next_token_colon
-            not_customer_token = (x_ids == customer_id) & ~is_next_token_colon
-
-            print(not_agent_token.nonzero())
-            # check x_ids for this
-            # / DBG
-
         doc_labels = example_batch["doc_labels"]
-        doc_negatives = example_batch["doc_negatives"]
 
         encodings = {
             "x_ids": x_ids,
             "x_mask": x_mask,
-            "ids": example_batch["ids"],
             "doc_labels": doc_labels,
             "agent_turn_mask": agent_turn,
             "customer_turn_mask": customer_turn,
@@ -334,51 +306,26 @@ def prepare_dataloader(tokenizer, args):
     return train_dataloader, valid_dataloader, tokenized_docs
 
 
-def run_model(batch, docs, encoder, model, num_z=4, supervised=False, true_z=False, kl_weight=1.0):
+def run_model(batch, docs, model):
     x_ids = batch["x_ids"].to(device)
     x_mask = batch["x_mask"].to(device)
-    z_labels = batch["doc_labels"].to(device)
+
+    bsz, x_len = x_ids.shape
 
     z_ids = docs.input_ids
     z_mask = docs.attention_mask
 
-    total_num_z, z_len = z_ids.shape
-    bsz, x_len = x_ids.shape
+    num_z, z_len = z_ids.shape
 
-    # encoder and log q(z|x)
-    x_out = encoder(input_ids=x_ids, attention_mask=x_mask)
-    z_out = encoder(input_ids=z_ids, attention_mask=z_mask)
+    # bsz x num_z x x_len
 
-    score_z_x = torch.einsum("xh,zh->xz", x_out.pooler_output, z_out.pooler_output)
-    log_qz_x = (score_z_x / 32).log_softmax(-1)
-
-    neg_log_qz = -log_qz_x[torch.arange(bsz), z_labels].mean()
-
-    # answer log p(y|x,z)
-
-    # subsample docs
-    if num_z < total_num_z:
-        topk_z = log_qz_x.topk(num_z, -1)
-        sampled_log_qz_x, z_idxs = topk_z
-        # TODO: add sample without replacement
-        if supervised or true_z:
-            z_idxs = torch.tensor([
-                idxs[:-1] + [z_labels[i]] if z_labels[i] not in idxs else idxs
-                for i, idxs in enumerate(z_idxs.tolist())
-            ], dtype=torch.int64, device=z_idxs.device)
-            sampled_log_qz_x = log_qz_x[torch.arange(bsz)[:,None], z_idxs]
-        z = z_ids[z_idxs]
-        mask = z_mask[z_idxs]
-    else:
-        sampled_log_qz_x = log_qz_x
-        z = z_ids[None].repeat(bsz, 1, 1)
-        mask = z_mask[None].repeat(bsz, 1, 1)
-
-    labels = x_ids[:, None].repeat(1, num_z, 1).view(bsz * num_z, x_len)
+    labels = (
+        x_ids[:, None].repeat(1, num_z, 1).view(bsz * num_z, x_len)
+    )
 
     out = model(
-        input_ids=z.view(bsz * num_z, z_len),
-        attention_mask=mask.view(bsz * num_z, z_len),
+        input_ids=z_ids[None].repeat(bsz, 1, 1).view(bsz * num_z, z_len),
+        attention_mask=z_mask[None].repeat(bsz, 1, 1).view(bsz * num_z, z_len),
         labels=labels,
     )
     logits = out.logits.log_softmax(-1)
@@ -388,111 +335,31 @@ def run_model(batch, docs, encoder, model, num_z=4, supervised=False, true_z=Fal
     )
     tok_loss[~x_mask.bool()[:, None].expand(bsz, num_z, T)] = 0
     log_py_z = tok_loss.sum(-1)
-    log_py = log_py_z.logsumexp(-1)
-    neg_log_py = -log_py.mean()
-
-    reconstruction = (sampled_log_qz_x.exp() * log_py_z).sum(-1)
-    # KL has better scaling than entropy, since subtracts uniform entropy
-    posterior_prior_kl = kl_divergence(
-        Categorical(logits=log_qz_x), Categorical(logits=torch.zeros_like(log_qz_x))
-    )
-    # posterior_prior_kl = Categorical(logits=log_qz_x).entropy()
-    # posterior_prior_kl = 0
-    neg_elbo = -(reconstruction - kl_weight * posterior_prior_kl).mean()
-
-    if not supervised:
-        loss = neg_elbo
-    else:
-        correct_z_mask = z_idxs == z_labels[:,None]
-        loss = neg_log_qz - log_py_z.log_softmax(-1)[correct_z_mask].mean()
-
-    return loss, log_qz_x, tok_loss
-
-def run_q_only(batch, docs, encoder, model, kl_weight=1.0):
-    x_ids = batch["x_ids"].to(device)
-    x_mask = batch["x_mask"].to(device)
-    z_labels = batch["doc_labels"].to(device)
-
-    z_ids = docs.input_ids
-    z_mask = docs.attention_mask
-
-    total_num_z, z_len = z_ids.shape
-    bsz, x_len = x_ids.shape
-    num_z = total_num_z
-
-    # encoder and log q(z|x)
-    x_out = encoder(input_ids=x_ids, attention_mask=x_mask)
-    z_out = encoder(input_ids=z_ids, attention_mask=z_mask)
-
-    score_z_x = torch.einsum("xh,zh->xz", x_out.pooler_output, z_out.pooler_output)
-    log_qz_x = (score_z_x / 32).log_softmax(-1)
-
-    neg_log_qz = -log_qz_x[torch.arange(bsz), z_labels].mean()
-
-    # answer log p(y|x,z)
-
-    # subsample docs
-    sampled_log_qz_x = log_qz_x
-    z = z_ids[None].repeat(bsz, 1, 1)
-    mask = z_mask[None].repeat(bsz, 1, 1)
-
-    labels = x_ids[:, None].repeat(1, num_z, 1).view(bsz * num_z, x_len)
-
-    with torch.no_grad():
-        out = model(
-            input_ids=z.view(bsz * num_z, z_len),
-            attention_mask=mask.view(bsz * num_z, z_len),
-            labels=labels,
-        )
-        logits = out.logits.log_softmax(-1)
-        N, T, V = logits.shape
-        tok_loss = logits[torch.arange(N)[:, None], torch.arange(T), labels].view(
-            bsz, num_z, T
-        )
-        tok_loss[~x_mask.bool()[:, None].expand(bsz, num_z, T)] = 0
-    log_py_z = tok_loss.sum(-1)
-    log_py = log_py_z.logsumexp(-1)
-    neg_log_py = -log_py.mean()
-
-    reconstruction = (sampled_log_qz_x.exp() * log_py_z).sum(-1)
-    # KL has better scaling than entropy, since subtracts uniform entropy
-    posterior_prior_kl = kl_divergence(
-        Categorical(logits=log_qz_x), Categorical(logits=torch.zeros_like(log_qz_x))
-    )
-    # posterior_prior_kl = Categorical(logits=log_qz_x).entropy()
-    # posterior_prior_kl = 0
-    neg_elbo = -(reconstruction - kl_weight * posterior_prior_kl).mean()
-
-    loss = neg_elbo
-
-    return loss, log_qz_x, tok_loss
+    neg_log_py = -log_py_z.logsumexp(-1).mean()
+    return neg_log_py, tok_loss
 
 
-def evaluate(steps, args, encoder, model, dataloader, docs, split):
+def evaluate(steps, args, model, dataloader, docs, split):
     y_nll = 0
     num_examples = 0
-
-    # evaluate encoder and intent model later
-
-    # answer model
-    acc_metric = load("accuracy")
-    first_action_acc_metric = load("accuracy")
-    q_acc_metric = load("accuracy")
+    acc_metric = load_metric("accuracy")
+    contrastive_acc_metric = load_metric("accuracy")
+    first_action_acc_metric = load_metric("accuracy")
 
     if not args.no_save_results and split == "Valid":
-        q_out = []
-        p_out = []
+        con_docs = []
+        doc_preds = []
         doc_golds = []
 
     num_docs = docs.input_ids.shape[0]
     z_idxs = torch.arange(num_docs, device=device, dtype=torch.int64)
-    #for step, batch in enumerate(dataloader):
+    # for step, batch in enumerate(dataloader):
     for step, batch in track(enumerate(dataloader), total=len(dataloader)):
-        bsz = batch["x_ids"].shape[0]
+        doc_idxs = batch["doc_idxs"].to(device)
+        bsz, num_z = doc_idxs.shape
 
-        loss, log_qz_x, log_py_z = run_model(
-            batch, docs, encoder, model, num_z=num_docs
-        )
+        batch["doc_idxs"] = z_idxs[None].expand(bsz, num_docs)
+        loss, log_py_z = run_model(batch, docs, model)
 
         y_nll += loss * bsz
         num_examples += bsz
@@ -500,10 +367,13 @@ def evaluate(steps, args, encoder, model, dataloader, docs, split):
         # log_py_z: bsz x num_z x time
         cum_log_py_z = log_py_z.cumsum(-1)
         z_hat = cum_log_py_z.argmax(1)
+        contrastive_scores = cum_log_py_z[torch.arange(bsz)[:, None], doc_idxs]
+        z_hat_contrastive = contrastive_scores.argmax(1)
 
         # index into start of agent turns
         agent_mask = batch["agent_turn_mask"]
         agent_z_hat = z_hat[agent_mask]
+        agent_z_hat_contrastive = z_hat_contrastive[agent_mask]
 
         action_mask = batch["action_turn_mask"]
         first_action_mask = action_mask.cumsum(1).cumsum(1) == 1
@@ -520,27 +390,24 @@ def evaluate(steps, args, encoder, model, dataloader, docs, split):
             predictions=agent_z_hat,
             references=doc_labels,
         )
+        contrastive_acc_metric.add_batch(
+            predictions=agent_z_hat_contrastive,
+            references=[num_z - 1] * sum(num_agent_turns),
+        )
         first_action_acc_metric.add_batch(
             predictions=action_z_hat,
             references=batch["doc_labels"],
         )
-        # hack for recall @ topk
-        q_acc_metric.add_batch(
-            predictions=(
-                log_qz_x.topk(args.num_z_samples, dim=-1).indices == batch["doc_labels"][:,None].to(device)
-            ).sum(-1) > 0,
-            references=[1 for _ in range(bsz)],
-        )
 
         if not args.no_save_results and split == "Valid":
-            q_out.append(log_qz_x.cpu())
-            p_out.append(log_py_z.cpu())
+            con_docs.append(doc_idxs.cpu())
+            doc_preds.append(log_py_z.cpu())
             doc_golds.append(batch["doc_labels"].cpu())
 
     avg_loss = y_nll.item() / num_examples
     z_acc = acc_metric.compute()
+    z_con_acc = contrastive_acc_metric.compute()
     z_first_action_acc = first_action_acc_metric.compute()
-    q_acc = q_acc_metric.compute()
 
     if not args.nolog:
         wandb.log(
@@ -549,27 +416,27 @@ def evaluate(steps, args, encoder, model, dataloader, docs, split):
                 f"{split} Answer NLL": avg_loss,
                 f"{split} Subflow Acc": z_acc,
                 f"{split} Subflow First action Acc": z_first_action_acc,
-                f"{split} Q(z|x) Recall @ {args.num_z_samples}": q_acc,
+                f"{split} Contrastive Subflow Acc": z_con_acc,
             }
         )
     if not args.no_save_results and split == "Valid":
         torch.save(
             (
-                q_out,
-                p_out,
+                con_docs,
+                doc_preds,
                 doc_golds,
             ),
             f"logging/{args.run_name}|step-{steps}.pt",
         )
 
-    print("avg los")
+    print("average loss")
     print(avg_loss)
     print("z acc")
     print(z_acc)
+    print("z contrastive acc")
+    print(z_con_acc)
     print("z first action acc")
     print(z_first_action_acc)
-    print(f"q(z|x) recall@{args.num_z_samples}")
-    print(q_acc)
 
     return avg_loss
 
@@ -578,26 +445,16 @@ def main():
     args = get_args()
     answer_tokenizer = AutoTokenizer.from_pretrained(args.answer_model_dir)
 
-    encoder_name = args.model_dir.split("/")[-1]
-    answer_model_name = args.answer_model_dir.split("/")[-1]
+    model_name = args.answer_model_dir.split("/")[-1]
     run_name = (
-        f"encoder-answer-model-{args.prefix}-{encoder_name}-{answer_model_name} "
+        f"all-answer-model-{args.prefix}-{model_name} "
         f"lr-{args.learning_rate} "
         f"bs-{args.batch_size*args.gradient_accumulation_steps} "
         f"dt-{args.num_dialogue_turns} "
         f"ds-{args.num_doc_sents} "
         f"ml-{args.max_length} "
-        f"k-{args.num_z_samples} "
-        f"se-{args.supervised_examples} "
-        f"qw-{args.q_warmup_steps} "
-        f"tz-{args.true_z} "
-        f"kl-{args.kl_weight} "
     )
     args.run_name = run_name
-    print(run_name)
-
-    encoder = AutoModel.from_pretrained(args.model_dir)
-    encoder = encoder.to(device)
 
     # answer_model_dir = args.answer_model_dir if not load_answer else load_answer
     # answer_model = AutoModelForSeq2SeqLM.from_pretrained(answer_model_dir)
@@ -609,22 +466,22 @@ def main():
         args,
     )
 
+    num_update_steps_per_epoch = math.ceil(
+        len(train_dataloader) / args.gradient_accumulation_steps
+    )
+    args.max_train_steps = args.epoch * num_update_steps_per_epoch
+    total_batch_size = args.batch_size * args.gradient_accumulation_steps
+    optim, lr_scheduler = prepare_optim_and_scheduler([answer_model], args)
 
     if not args.nolog:
         wandb.init(name=run_name, project="abcd_unsup_subflow", tags=["abcd"])
         wandb.config.lr = args.learning_rate
-        wandb.watch(encoder)
         wandb.watch(answer_model)
 
     if args.eval_only:
         args.no_save_model = True
         args.nolog = True
         completed_steps = -1
-
-        # load models
-        savepath = f"{args.output_model_dir}/{run_name}-encoder"
-        encoder = AutoModelForSeq2SeqLM.from_pretrained(savepath)
-        encoder = encoder.to(device)
 
         savepath = f"{args.output_model_dir}/{run_name}-answer"
         answer_model = AutoModelForSeq2SeqLM.from_pretrained(savepath)
@@ -634,7 +491,6 @@ def main():
             valid_loss = evaluate(
                 steps=completed_steps,
                 args=args,
-                encoder=encoder,
                 model=answer_model,
                 docs=docs,
                 dataloader=eval_dataloader,
@@ -642,75 +498,11 @@ def main():
             )
         sys.exit()
 
-    completed_steps = 0
-    if args.q_warmup_steps > 0:
-        nolog = args.nolog
-        args.nolog = True
-        print("WARMING UP Q")
-        # q initial training loop
-        args.max_train_steps = args.q_warmup_steps
-        optim, lr_scheduler = prepare_optim_and_scheduler([encoder], args)
-
-        progress_bar = tqdm(range(args.q_warmup_steps))
-        best_valid = float("inf")
-        encoder.train()
-        answer_model.eval()
-        for step, batch in enumerate(train_dataloader):
-            if (
-                completed_steps % args.eval_steps == 0
-                and completed_steps > 0
-                and step % args.gradient_accumulation_steps == 0
-            ):
-                encoder.eval()
-                answer_model.eval()
-                with torch.no_grad():
-                    valid_loss = evaluate(
-                        steps=completed_steps,
-                        args=args,
-                        encoder=encoder,
-                        model=answer_model,
-                        docs=docs,
-                        dataloader=eval_dataloader,
-                        split="Valid",
-                    )
-                if valid_loss < best_valid:
-                    best_valid = valid_loss
-                    if not args.no_save_model:
-                        encoder.save_pretrained(
-                            f"{args.output_model_dir}/{run_name}-encoder"
-                        )
-                encoder.train()
-            loss, log_qz_x, log_py_z = run_q_only(
-                batch, docs, encoder, answer_model,
-                kl_weight=args.kl_weight,
-            )
-            loss.backward()
-            if (
-                step % args.gradient_accumulation_steps == 0
-                or step == len(train_dataloader) - 1
-            ):
-                optim.step()
-                lr_scheduler.step()
-                optim.zero_grad()
-                progress_bar.update(1)
-                completed_steps += 1
-            if completed_steps > args.q_warmup_steps:
-                break
-        # reset logging
-        args.nolog = nolog
-
-    # full training loop
-    num_update_steps_per_epoch = math.ceil(
-        len(train_dataloader) / args.gradient_accumulation_steps
-    )
-    args.max_train_steps = args.epoch * num_update_steps_per_epoch
-    total_batch_size = args.batch_size * args.gradient_accumulation_steps
-    optim, lr_scheduler = prepare_optim_and_scheduler([encoder, answer_model], args)
-
     progress_bar = tqdm(range(args.max_train_steps))
-    best_valid = float("inf")
     completed_steps = 0
-    encoder.train()
+
+    # best_valid = float("-inf")
+    best_valid = float("inf")
     answer_model.train()
     for epoch in range(args.epoch):
         for step, batch in enumerate(train_dataloader):
@@ -719,13 +511,11 @@ def main():
                 and completed_steps > 0
                 and step % args.gradient_accumulation_steps == 0
             ):
-                encoder.eval()
                 answer_model.eval()
                 with torch.no_grad():
                     valid_loss = evaluate(
                         steps=completed_steps,
                         args=args,
-                        encoder=encoder,
                         model=answer_model,
                         docs=docs,
                         dataloader=eval_dataloader,
@@ -734,20 +524,11 @@ def main():
                 if valid_loss < best_valid:
                     best_valid = valid_loss
                     if not args.no_save_model:
-                        encoder.save_pretrained(
-                            f"{args.output_model_dir}/{run_name}-encoder"
-                        )
                         answer_model.save_pretrained(
                             f"{args.output_model_dir}/{run_name}-answer"
                         )
-                encoder.train()
                 answer_model.train()
-            loss, log_qz_x, log_py_z = run_model(
-                batch, docs, encoder, answer_model, num_z=args.num_z_samples,
-                supervised=completed_steps * args.batch_size < args.supervised_examples,
-                true_z=args.true_z,
-                kl_weight=args.kl_weight,
-            )
+            loss, _ = run_model(batch, docs, answer_model)
             loss.backward()
             if (
                 step % args.gradient_accumulation_steps == 0

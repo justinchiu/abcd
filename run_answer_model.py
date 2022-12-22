@@ -46,7 +46,7 @@ action_token = "Ġaction"
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--prefix", default="1220", help="date")
+    parser.add_argument("--prefix", default="1222", help="date")
 
     parser.add_argument("--interact_data", action="store_true")
     parser.add_argument("--eval_only", action="store_true")
