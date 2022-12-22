@@ -91,6 +91,12 @@ def get_args():
         "this should be as small as possible",
     )
     parser.add_argument(
+        "--q_warmup_steps",
+        default=0,
+        type=int,
+        help="number of q warmup steps",
+    )
+    parser.add_argument(
         "--epoch",
         "-epoch",
         default=5,
@@ -335,32 +341,32 @@ def run_model(batch, docs, encoder, model, num_z=4, supervised=False):
     total_num_z, z_len = z_ids.shape
     bsz, x_len = x_ids.shape
 
-    # encoder and log p(z|x)
+    # encoder and log q(z|x)
     x_out = encoder(input_ids=x_ids, attention_mask=x_mask)
     z_out = encoder(input_ids=z_ids, attention_mask=z_mask)
 
     score_z_x = torch.einsum("xh,zh->xz", x_out.pooler_output, z_out.pooler_output)
-    log_pz_x = (score_z_x / 32).log_softmax(-1)
+    log_qz_x = (score_z_x / 32).log_softmax(-1)
 
-    neg_log_pz = -log_pz_x[torch.arange(bsz), z_labels].mean()
+    neg_log_qz = -log_qz_x[torch.arange(bsz), z_labels].mean()
 
     # answer log p(y|x,z)
 
     # subsample docs
     if num_z < total_num_z:
-        topk_z = log_pz_x.topk(num_z, -1)
-        sampled_log_pz_x, z_idxs = topk_z
+        topk_z = log_qz_x.topk(num_z, -1)
+        sampled_log_qz_x, z_idxs = topk_z
         # TODO: add sample without replacement
         if supervised:
             z_idxs = torch.tensor([
                 idxs[:-1] + [z_labels[i]] if z_labels[i] not in idxs else idxs
                 for i, idxs in enumerate(z_idxs.tolist())
             ], dtype=torch.int64, device=z_idxs.device)
-            sampled_log_pz_x = log_pz_x[torch.arange(bsz)[:,None], z_idxs]
+            sampled_log_qz_x = log_qz_x[torch.arange(bsz)[:,None], z_idxs]
         z = z_ids[z_idxs]
         mask = z_mask[z_idxs]
     else:
-        sampled_log_pz_x = log_pz_x
+        sampled_log_qz_x = log_qz_x
         z = z_ids[None].repeat(bsz, 1, 1)
         mask = z_mask[None].repeat(bsz, 1, 1)
 
@@ -381,12 +387,12 @@ def run_model(batch, docs, encoder, model, num_z=4, supervised=False):
     log_py = log_py_z.logsumexp(-1)
     neg_log_py = -log_py.mean()
 
-    reconstruction = (sampled_log_pz_x.exp() * log_py_z).sum(-1)
+    reconstruction = (sampled_log_qz_x.exp() * log_py_z).sum(-1)
     # KL has better scaling than entropy, since subtracts uniform entropy
     posterior_prior_kl = kl_divergence(
-        Categorical(logits=log_pz_x), Categorical(logits=torch.zeros_like(log_pz_x))
+        Categorical(logits=log_qz_x), Categorical(logits=torch.zeros_like(log_qz_x))
     )
-    # posterior_prior_kl = Categorical(logits=log_pz_x).entropy()
+    # posterior_prior_kl = Categorical(logits=log_qz_x).entropy()
     # posterior_prior_kl = 0
     neg_elbo = -(reconstruction - posterior_prior_kl).mean()
 
@@ -394,9 +400,68 @@ def run_model(batch, docs, encoder, model, num_z=4, supervised=False):
         loss = neg_elbo
     else:
         correct_z_mask = z_idxs == z_labels[:,None]
-        loss = neg_log_pz - log_py_z.log_softmax(-1)[correct_z_mask].mean()
+        loss = neg_log_qz - log_py_z.log_softmax(-1)[correct_z_mask].mean()
 
-    return loss, log_pz_x, tok_loss
+    return loss, log_qz_x, tok_loss
+
+def run_q_only(batch, docs, encoder, model):
+    x_ids = batch["x_ids"].to(device)
+    x_mask = batch["x_mask"].to(device)
+    z_labels = batch["doc_labels"].to(device)
+
+    z_ids = docs.input_ids
+    z_mask = docs.attention_mask
+
+    total_num_z, z_len = z_ids.shape
+    bsz, x_len = x_ids.shape
+    num_z = total_num_z
+
+    # encoder and log q(z|x)
+    x_out = encoder(input_ids=x_ids, attention_mask=x_mask)
+    z_out = encoder(input_ids=z_ids, attention_mask=z_mask)
+
+    score_z_x = torch.einsum("xh,zh->xz", x_out.pooler_output, z_out.pooler_output)
+    log_qz_x = (score_z_x / 32).log_softmax(-1)
+
+    neg_log_qz = -log_qz_x[torch.arange(bsz), z_labels].mean()
+
+    # answer log p(y|x,z)
+
+    # subsample docs
+    sampled_log_qz_x = log_qz_x
+    z = z_ids[None].repeat(bsz, 1, 1)
+    mask = z_mask[None].repeat(bsz, 1, 1)
+
+    labels = x_ids[:, None].repeat(1, num_z, 1).view(bsz * num_z, x_len)
+
+    with torch.no_grad():
+        out = model(
+            input_ids=z.view(bsz * num_z, z_len),
+            attention_mask=mask.view(bsz * num_z, z_len),
+            labels=labels,
+        )
+        logits = out.logits.log_softmax(-1)
+        N, T, V = logits.shape
+        tok_loss = logits[torch.arange(N)[:, None], torch.arange(T), labels].view(
+            bsz, num_z, T
+        )
+        tok_loss[~x_mask.bool()[:, None].expand(bsz, num_z, T)] = 0
+    log_py_z = tok_loss.sum(-1)
+    log_py = log_py_z.logsumexp(-1)
+    neg_log_py = -log_py.mean()
+
+    reconstruction = (sampled_log_qz_x.exp() * log_py_z).sum(-1)
+    # KL has better scaling than entropy, since subtracts uniform entropy
+    posterior_prior_kl = kl_divergence(
+        Categorical(logits=log_qz_x), Categorical(logits=torch.zeros_like(log_qz_x))
+    )
+    # posterior_prior_kl = Categorical(logits=log_qz_x).entropy()
+    # posterior_prior_kl = 0
+    neg_elbo = -(reconstruction - posterior_prior_kl).mean()
+
+    loss = neg_elbo
+
+    return loss, log_qz_x, tok_loss
 
 
 def evaluate(steps, args, encoder, model, dataloader, docs, split):
@@ -479,7 +544,7 @@ def evaluate(steps, args, encoder, model, dataloader, docs, split):
                 f"{split} Answer NLL": avg_loss,
                 f"{split} Subflow Acc": z_acc,
                 f"{split} Subflow First action Acc": z_first_action_acc,
-                f"{split} Q(z|x) Acc": q_acc,
+                f"{split} Q(z|x) Recall @ {args.num_z_samples}": q_acc,
             }
         )
     if not args.no_save_results and split == "Valid":
@@ -497,7 +562,7 @@ def evaluate(steps, args, encoder, model, dataloader, docs, split):
     print(z_acc)
     print("z first action acc")
     print(z_first_action_acc)
-    print("q(z|x) acc")
+    print(f"q(z|x) recall@{args.num_z_samples}")
     print(q_acc)
 
     return avg_loss
@@ -517,7 +582,8 @@ def main():
         f"ds-{args.num_doc_sents} "
         f"ml-{args.max_length} "
         f"k-{args.num_z_samples} "
-        f"se-{args.supervised_examples}"
+        f"se-{args.supervised_examples} "
+        f"qw-{args.q_warmup_steps}"
     )
     args.run_name = run_name
 
@@ -534,16 +600,11 @@ def main():
         args,
     )
 
-    num_update_steps_per_epoch = math.ceil(
-        len(train_dataloader) / args.gradient_accumulation_steps
-    )
-    args.max_train_steps = args.epoch * num_update_steps_per_epoch
-    total_batch_size = args.batch_size * args.gradient_accumulation_steps
-    optim, lr_scheduler = prepare_optim_and_scheduler([encoder, answer_model], args)
 
     if not args.nolog:
         wandb.init(name=run_name, project="abcd_unsup_subflow", tags=["abcd"])
         wandb.config.lr = args.learning_rate
+        wandb.watch(encoder)
         wandb.watch(answer_model)
 
     if args.eval_only:
@@ -572,11 +633,73 @@ def main():
             )
         sys.exit()
 
-    progress_bar = tqdm(range(args.max_train_steps))
     completed_steps = 0
+    if args.q_warmup_steps > 0:
+        nolog = args.nolog
+        args.nolog = True
+        print("WARMING UP Q")
+        # q initial training loop
+        args.max_train_steps = args.q_warmup_steps
+        optim, lr_scheduler = prepare_optim_and_scheduler([encoder], args)
 
-    # best_valid = float("-inf")
+        progress_bar = tqdm(range(args.q_warmup_steps))
+        best_valid = float("inf")
+        encoder.train()
+        answer_model.eval()
+        for step, batch in enumerate(train_dataloader):
+            if (
+                completed_steps % args.eval_steps == 0
+                and completed_steps > 0
+                and step % args.gradient_accumulation_steps == 0
+            ):
+                encoder.eval()
+                answer_model.eval()
+                with torch.no_grad():
+                    valid_loss = evaluate(
+                        steps=completed_steps,
+                        args=args,
+                        encoder=encoder,
+                        model=answer_model,
+                        docs=docs,
+                        dataloader=eval_dataloader,
+                        split="Valid",
+                    )
+                if valid_loss < best_valid:
+                    best_valid = valid_loss
+                    if not args.no_save_model:
+                        encoder.save_pretrained(
+                            f"{args.output_model_dir}/{run_name}-encoder"
+                        )
+                encoder.train()
+            loss, log_qz_x, log_py_z = run_q_only(
+                batch, docs, encoder, answer_model
+            )
+            loss.backward()
+            if (
+                step % args.gradient_accumulation_steps == 0
+                or step == len(train_dataloader) - 1
+            ):
+                optim.step()
+                lr_scheduler.step()
+                optim.zero_grad()
+                progress_bar.update(1)
+                completed_steps += 1
+            if completed_steps > args.q_warmup_steps:
+                break
+        # reset logging
+        args.nolog = nolog
+
+    # full training loop
+    num_update_steps_per_epoch = math.ceil(
+        len(train_dataloader) / args.gradient_accumulation_steps
+    )
+    args.max_train_steps = args.epoch * num_update_steps_per_epoch
+    total_batch_size = args.batch_size * args.gradient_accumulation_steps
+    optim, lr_scheduler = prepare_optim_and_scheduler([encoder, answer_model], args)
+
+    progress_bar = tqdm(range(args.max_train_steps))
     best_valid = float("inf")
+    completed_steps = 0
     encoder.train()
     answer_model.train()
     for epoch in range(args.epoch):
@@ -609,7 +732,7 @@ def main():
                         )
                 encoder.train()
                 answer_model.train()
-            loss, log_pz_x, log_py_z = run_model(
+            loss, log_qz_x, log_py_z = run_model(
                 batch, docs, encoder, answer_model, num_z=args.num_z_samples,
                 supervised=completed_steps * args.batch_size < args.supervised_examples,
             )

@@ -10,12 +10,21 @@ from subflow_data import get_abcd_dataset
 random.seed(1234)
 
 max_length = 256
-max_length = None
+#max_length = None
+K = 8
+K = 4
+K = 16
 
 # lexical accuracy is better with lowercase
+# this is the best setting for doing full-document
+val_dataset, processed_docs, subflow_map = get_abcd_dataset(
+    "dev", 0, 0, lower=True, truncate_early=False
+)
+"""
 val_dataset, processed_docs, subflow_map = get_abcd_dataset(
     "dev", 0, 0, lower=True, truncate_early=True
 )
+"""
 """
 val_dataset, processed_docs, subflow_map = get_abcd_dataset(
     "dev", 0, 0, lower=True, truncate_early=True
@@ -34,6 +43,7 @@ bm25 = BM25Okapi(tokenized_corpus)
 
 accuracy = evaluate.load("accuracy")
 contrastive_accuracy = evaluate.load("accuracy")
+recall = evaluate.load("accuracy")
 for e in val_dataset:
     xs = e["xs"]
     subflow = e["subflows"]
@@ -49,8 +59,11 @@ for e in val_dataset:
     scores = bm25.get_scores(tokenized_query)
     idxs = distractors + [idx]
 
+    topk = (-scores).argsort()[:K]
+
     accuracy.add(reference=idx, prediction=scores.argmax())
     contrastive_accuracy.add(reference=3, prediction=scores[idxs].argmax())
+    recall.add(reference=True, prediction=(topk == idx).any())
 
 print(
     "Validation document selection accuracy:",
@@ -59,4 +72,8 @@ print(
 print(
     "Validation contrastive document selection accuracy:",
     contrastive_accuracy.compute()["accuracy"],
+)
+print(
+    f"Validation document selection recall@{K}:",
+    recall.compute()["accuracy"],
 )
