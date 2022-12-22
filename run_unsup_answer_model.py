@@ -13,7 +13,7 @@ import sys
 
 import pdb
 
-from datasets import load_metric
+from evaluate import load
 from torch.utils.data.sampler import BatchSampler, RandomSampler
 
 
@@ -84,10 +84,11 @@ def get_args():
         help="number of steps between each evaluation.",
     )
     parser.add_argument(
-        "--full_eval_steps",
-        default=50000,
+        "--supervised_examples",
+        default=0,
         type=int,
-        help="number of steps between each FULL/expensive evaluation.",
+        help="number of fully supervised training examples for q(z|x) and p(x|z). "
+        "this should be as small as possible",
     )
     parser.add_argument(
         "--epoch",
@@ -204,7 +205,7 @@ def prepare_dataloader(tokenizer, args):
         )
         x_ids = tokenized_x.input_ids
         x_mask = tokenized_x.attention_mask
-        #x_ids[x_ids == padding_id] = -100
+        # x_ids[x_ids == padding_id] = -100
         # the -100 is for NLLCriterion
 
         # GET TURN INDICES
@@ -323,7 +324,7 @@ def prepare_dataloader(tokenizer, args):
     return train_dataloader, valid_dataloader, tokenized_docs
 
 
-def run_model(batch, docs, encoder, model, num_z=4):
+def run_model(batch, docs, encoder, model, num_z=4, supervised=False):
     x_ids = batch["x_ids"].to(device)
     x_mask = batch["x_mask"].to(device)
     z_labels = batch["doc_labels"].to(device)
@@ -350,6 +351,12 @@ def run_model(batch, docs, encoder, model, num_z=4):
         topk_z = log_pz_x.topk(num_z, -1)
         sampled_log_pz_x, z_idxs = topk_z
         # TODO: add sample without replacement
+        if supervised:
+            z_idxs = torch.tensor([
+                idxs[:-1] + [z_labels[i]] if z_labels[i] not in idxs else idxs
+                for i, idxs in enumerate(z_idxs.tolist())
+            ], dtype=torch.int64, device=z_idxs.device)
+            sampled_log_pz_x = log_pz_x[torch.arange(bsz)[:,None], z_idxs]
         z = z_ids[z_idxs]
         mask = z_mask[z_idxs]
     else:
@@ -357,10 +364,7 @@ def run_model(batch, docs, encoder, model, num_z=4):
         z = z_ids[None].repeat(bsz, 1, 1)
         mask = z_mask[None].repeat(bsz, 1, 1)
 
-    labels = (
-        #x_ids[:, None].expand(bsz, num_z, x_len).contiguous().view(bsz * num_z, x_len)
-        x_ids[:, None].repeat(1, num_z, 1).view(bsz * num_z, x_len)
-    )
+    labels = x_ids[:, None].repeat(1, num_z, 1).view(bsz * num_z, x_len)
 
     out = model(
         input_ids=z.view(bsz * num_z, z_len),
@@ -377,15 +381,22 @@ def run_model(batch, docs, encoder, model, num_z=4):
     log_py = log_py_z.logsumexp(-1)
     neg_log_py = -log_py.mean()
 
-    #return neg_log_py, tok_loss
-
     reconstruction = (sampled_log_pz_x.exp() * log_py_z).sum(-1)
     # KL has better scaling than entropy, since subtracts uniform entropy
-    posterior_prior_kl = kl_divergence(Categorical(logits=log_pz_x), Categorical(logits=torch.zeros_like(log_pz_x)))
-    #posterior_prior_kl = Categorical(logits=log_pz_x).entropy()
-    elbo = (reconstruction - posterior_prior_kl).mean()
+    posterior_prior_kl = kl_divergence(
+        Categorical(logits=log_pz_x), Categorical(logits=torch.zeros_like(log_pz_x))
+    )
+    # posterior_prior_kl = Categorical(logits=log_pz_x).entropy()
+    # posterior_prior_kl = 0
+    neg_elbo = -(reconstruction - posterior_prior_kl).mean()
 
-    return -elbo, log_pz_x, tok_loss
+    if not supervised:
+        loss = neg_elbo
+    else:
+        correct_z_mask = z_idxs == z_labels[:,None]
+        loss = neg_log_pz - log_py_z.log_softmax(-1)[correct_z_mask].mean()
+
+    return loss, log_pz_x, tok_loss
 
 
 def evaluate(steps, args, encoder, model, dataloader, docs, split):
@@ -395,8 +406,9 @@ def evaluate(steps, args, encoder, model, dataloader, docs, split):
     # evaluate encoder and intent model later
 
     # answer model
-    acc_metric = load_metric("accuracy")
-    first_action_acc_metric = load_metric("accuracy")
+    acc_metric = load("accuracy")
+    first_action_acc_metric = load("accuracy")
+    q_acc_metric = load("accuracy")
 
     if not args.no_save_results and split == "Valid":
         con_docs = []
@@ -409,7 +421,9 @@ def evaluate(steps, args, encoder, model, dataloader, docs, split):
     for step, batch in track(enumerate(dataloader), total=len(dataloader)):
         bsz = batch["x_ids"].shape[0]
 
-        loss, log_pz_x, log_py_z = run_model(batch, docs, encoder, model, num_z=num_docs)
+        loss, log_qz_x, log_py_z = run_model(
+            batch, docs, encoder, model, num_z=num_docs
+        )
 
         y_nll += loss * bsz
         num_examples += bsz
@@ -441,6 +455,13 @@ def evaluate(steps, args, encoder, model, dataloader, docs, split):
             predictions=action_z_hat,
             references=batch["doc_labels"],
         )
+        # hack for recall @ topk
+        q_acc_metric.add_batch(
+            predictions=(
+                log_qz_x.topk(args.num_z_samples, dim=-1).indices == batch["doc_labels"][:,None].to(device)
+            ).sum(-1) > 0,
+            references=[1 for _ in range(bsz)],
+        )
 
         if not args.no_save_results and split == "Valid":
             doc_preds.append(cum_log_py_z.cpu())
@@ -449,6 +470,7 @@ def evaluate(steps, args, encoder, model, dataloader, docs, split):
     avg_loss = y_nll.item() / num_examples
     z_acc = acc_metric.compute()
     z_first_action_acc = first_action_acc_metric.compute()
+    q_acc = q_acc_metric.compute()
 
     if not args.nolog:
         wandb.log(
@@ -457,6 +479,7 @@ def evaluate(steps, args, encoder, model, dataloader, docs, split):
                 f"{split} Answer NLL": avg_loss,
                 f"{split} Subflow Acc": z_acc,
                 f"{split} Subflow First action Acc": z_first_action_acc,
+                f"{split} Q(z|x) Acc": q_acc,
             }
         )
     if not args.no_save_results and split == "Valid":
@@ -468,9 +491,14 @@ def evaluate(steps, args, encoder, model, dataloader, docs, split):
             f"logging/{args.run_name}|step-{steps}.pt",
         )
 
+    print("avg los")
     print(avg_loss)
+    print("z acc")
     print(z_acc)
+    print("z first action acc")
     print(z_first_action_acc)
+    print("q(z|x) acc")
+    print(q_acc)
 
     return avg_loss
 
@@ -489,6 +517,7 @@ def main():
         f"ds-{args.num_doc_sents} "
         f"ml-{args.max_length} "
         f"k-{args.num_z_samples} "
+        f"se-{args.supervised_examples}"
     )
     args.run_name = run_name
 
@@ -510,7 +539,7 @@ def main():
     )
     args.max_train_steps = args.epoch * num_update_steps_per_epoch
     total_batch_size = args.batch_size * args.gradient_accumulation_steps
-    optim, lr_scheduler = prepare_optim_and_scheduler([answer_model], args)
+    optim, lr_scheduler = prepare_optim_and_scheduler([encoder, answer_model], args)
 
     if not args.nolog:
         wandb.init(name=run_name, project="abcd_unsup_subflow", tags=["abcd"])
@@ -580,7 +609,10 @@ def main():
                         )
                 encoder.train()
                 answer_model.train()
-            loss, log_pz_x, log_py_z = run_model(batch, docs, encoder, answer_model, num_z=args.num_z_samples)
+            loss, log_pz_x, log_py_z = run_model(
+                batch, docs, encoder, answer_model, num_z=args.num_z_samples,
+                supervised=completed_steps * args.batch_size < args.supervised_examples,
+            )
             loss.backward()
             if (
                 step % args.gradient_accumulation_steps == 0

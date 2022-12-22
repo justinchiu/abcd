@@ -67,4 +67,3 @@ print(
     "Validation contrastive document selection accuracy:",
     contrastive_accuracy.compute()["accuracy"],
 )
-

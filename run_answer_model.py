@@ -383,7 +383,7 @@ def evaluate(steps, args, model, dataloader, docs, split):
 
     num_docs = docs.input_ids.shape[0]
     z_idxs = torch.arange(num_docs, device=device, dtype=torch.int64)
-    #for step, batch in enumerate(dataloader):
+    # for step, batch in enumerate(dataloader):
     for step, batch in track(enumerate(dataloader), total=len(dataloader)):
         doc_idxs = batch["doc_idxs"].to(device)
         bsz, num_z = doc_idxs.shape
