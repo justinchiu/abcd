@@ -55,6 +55,9 @@ def get_args():
     parser.add_argument("--interact_data", action="store_true")
     parser.add_argument("--eval_only", action="store_true")
 
+    parser.add_argument("--true_z", action="store_true")
+    parser.add_argument("--kl_weight", default=1.0, type=float)
+
     parser.add_argument("--nolog", action="store_true")
     parser.add_argument("--no_save_model", action="store_true")
     parser.add_argument("--no_save_results", action="store_true")
@@ -330,7 +333,7 @@ def prepare_dataloader(tokenizer, args):
     return train_dataloader, valid_dataloader, tokenized_docs
 
 
-def run_model(batch, docs, encoder, model, num_z=4, supervised=False):
+def run_model(batch, docs, encoder, model, num_z=4, supervised=False, true_z=False, kl_weight=1.0):
     x_ids = batch["x_ids"].to(device)
     x_mask = batch["x_mask"].to(device)
     z_labels = batch["doc_labels"].to(device)
@@ -357,7 +360,7 @@ def run_model(batch, docs, encoder, model, num_z=4, supervised=False):
         topk_z = log_qz_x.topk(num_z, -1)
         sampled_log_qz_x, z_idxs = topk_z
         # TODO: add sample without replacement
-        if supervised:
+        if supervised or true_z:
             z_idxs = torch.tensor([
                 idxs[:-1] + [z_labels[i]] if z_labels[i] not in idxs else idxs
                 for i, idxs in enumerate(z_idxs.tolist())
@@ -394,7 +397,7 @@ def run_model(batch, docs, encoder, model, num_z=4, supervised=False):
     )
     # posterior_prior_kl = Categorical(logits=log_qz_x).entropy()
     # posterior_prior_kl = 0
-    neg_elbo = -(reconstruction - posterior_prior_kl).mean()
+    neg_elbo = -(reconstruction - kl_weight * posterior_prior_kl).mean()
 
     if not supervised:
         loss = neg_elbo
@@ -404,7 +407,7 @@ def run_model(batch, docs, encoder, model, num_z=4, supervised=False):
 
     return loss, log_qz_x, tok_loss
 
-def run_q_only(batch, docs, encoder, model):
+def run_q_only(batch, docs, encoder, model, kl_weight=1.0):
     x_ids = batch["x_ids"].to(device)
     x_mask = batch["x_mask"].to(device)
     z_labels = batch["doc_labels"].to(device)
@@ -457,7 +460,7 @@ def run_q_only(batch, docs, encoder, model):
     )
     # posterior_prior_kl = Categorical(logits=log_qz_x).entropy()
     # posterior_prior_kl = 0
-    neg_elbo = -(reconstruction - posterior_prior_kl).mean()
+    neg_elbo = -(reconstruction - kl_weight * posterior_prior_kl).mean()
 
     loss = neg_elbo
 
@@ -476,8 +479,8 @@ def evaluate(steps, args, encoder, model, dataloader, docs, split):
     q_acc_metric = load("accuracy")
 
     if not args.no_save_results and split == "Valid":
-        con_docs = []
-        doc_preds = []
+        q_out = []
+        p_out = []
         doc_golds = []
 
     num_docs = docs.input_ids.shape[0]
@@ -529,7 +532,8 @@ def evaluate(steps, args, encoder, model, dataloader, docs, split):
         )
 
         if not args.no_save_results and split == "Valid":
-            doc_preds.append(cum_log_py_z.cpu())
+            q_out.append(log_qz_x.cpu())
+            p_out.append(log_py_z.cpu())
             doc_golds.append(batch["doc_labels"].cpu())
 
     avg_loss = y_nll.item() / num_examples
@@ -550,7 +554,8 @@ def evaluate(steps, args, encoder, model, dataloader, docs, split):
     if not args.no_save_results and split == "Valid":
         torch.save(
             (
-                doc_preds,
+                q_out,
+                p_out,
                 doc_golds,
             ),
             f"logging/{args.run_name}|step-{steps}.pt",
@@ -583,9 +588,12 @@ def main():
         f"ml-{args.max_length} "
         f"k-{args.num_z_samples} "
         f"se-{args.supervised_examples} "
-        f"qw-{args.q_warmup_steps}"
+        f"qw-{args.q_warmup_steps} "
+        f"tz-{args.true_z} "
+        f"kl-{args.kl_weight} "
     )
     args.run_name = run_name
+    print(run_name)
 
     encoder = AutoModel.from_pretrained(args.model_dir)
     encoder = encoder.to(device)
@@ -672,7 +680,8 @@ def main():
                         )
                 encoder.train()
             loss, log_qz_x, log_py_z = run_q_only(
-                batch, docs, encoder, answer_model
+                batch, docs, encoder, answer_model,
+                kl_weight=args.kl_weight,
             )
             loss.backward()
             if (
@@ -735,6 +744,8 @@ def main():
             loss, log_qz_x, log_py_z = run_model(
                 batch, docs, encoder, answer_model, num_z=args.num_z_samples,
                 supervised=completed_steps * args.batch_size < args.supervised_examples,
+                true_z=args.true_z,
+                kl_weight=args.kl_weight,
             )
             loss.backward()
             if (
