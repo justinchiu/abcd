@@ -350,27 +350,28 @@ def run_model(batch, docs, encoder, model, num_z=4, supervised=False, true_z=Fal
     z_out = encoder(input_ids=z_ids, attention_mask=z_mask)
 
     score_z_x = torch.einsum("xh,zh->xz", x_out.pooler_output, z_out.pooler_output)
-    log_qz_x = (score_z_x / 32).log_softmax(-1)
+    logits_qz_x = (score_z_x / 32)
 
+    log_qz_x = logits_qz_x.log_softmax(-1)
     neg_log_qz = -log_qz_x[torch.arange(bsz), z_labels].mean()
 
     # answer log p(y|x,z)
 
     # subsample docs
     if num_z < total_num_z:
-        topk_z = log_qz_x.topk(num_z, -1)
-        sampled_log_qz_x, z_idxs = topk_z
+        topk_z = logits_qz_x.topk(num_z, -1)
+        sampled_logits_qz_x, z_idxs = topk_z
         # TODO: add sample without replacement
         if supervised or true_z:
             z_idxs = torch.tensor([
                 idxs[:-1] + [z_labels[i]] if z_labels[i] not in idxs else idxs
                 for i, idxs in enumerate(z_idxs.tolist())
             ], dtype=torch.int64, device=z_idxs.device)
-            sampled_log_qz_x = log_qz_x[torch.arange(bsz)[:,None], z_idxs]
+            sampled_logits_qz_x = log_qz_x[torch.arange(bsz)[:,None], z_idxs]
         z = z_ids[z_idxs]
         mask = z_mask[z_idxs]
     else:
-        sampled_log_qz_x = log_qz_x
+        sampled_logits_qz_x = logits_qz_x
         z = z_ids[None].repeat(bsz, 1, 1)
         mask = z_mask[None].repeat(bsz, 1, 1)
 
@@ -394,7 +395,7 @@ def run_model(batch, docs, encoder, model, num_z=4, supervised=False, true_z=Fal
     # loss = logsumexp_z log p(y|z) - KL[p(z|x) || q(z|x)]
     # approximate the latter with self-normalized importance sampling
     approx_log_pz_x = log_py_z.log_softmax(-1)
-    approx_log_qz_x = sampled_log_qz_x.log_softmax(-1)
+    approx_log_qz_x = sampled_logits_qz_x.log_softmax(-1)
     p_q_kl = kl_divergence(
         Categorical(logits=approx_log_pz_x),
         Categorical(logits=approx_log_qz_x)
