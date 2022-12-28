@@ -391,10 +391,14 @@ def run_model(batch, docs, encoder, model, num_z=4, supervised=False, true_z=Fal
     log_py = log_py_z.logsumexp(-1)
     neg_log_py = -log_py.mean()
 
+    # leave-one-out average baseline
     R = log_py_z.detach()
-    baseline = (R[:,None] - R[:,:,None]).sum(-1) / (num_z-1)
+    baseline = (R.sum(-1, keepdims=True) - R) / (num_z-1)
 
     reconstruction = (sampled_log_qz_x.exp() * (log_py_z - baseline)).sum(-1)
+    #reconstruction_p = (sampled_log_qz_x.detach().exp() * log_py_z).sum(-1)
+    #reconstruction_q = ((log_py_z.detach() - baseline) * sampled_log_qz_x).sum(-1)
+
     # KL has better scaling than entropy, since subtracts uniform entropy
     posterior_prior_kl = kl_divergence(
         Categorical(logits=log_qz_x), Categorical(logits=torch.zeros_like(log_qz_x))
@@ -402,6 +406,7 @@ def run_model(batch, docs, encoder, model, num_z=4, supervised=False, true_z=Fal
     # posterior_prior_kl = Categorical(logits=log_qz_x).entropy()
     # posterior_prior_kl = 0
     neg_elbo = -(reconstruction - kl_weight * posterior_prior_kl).mean()
+    #neg_elbo = -(reconstruction_p + reconstruction_q - kl_weight * posterior_prior_kl).mean()
 
     if not supervised:
         loss = neg_elbo
