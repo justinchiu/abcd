@@ -394,7 +394,8 @@ def run_model(batch, docs, encoder, model, num_z=4, supervised=False, true_z=Fal
 
     # loss = logsumexp_z log p(y|z) - KL[p(z|x) || q(z|x)]
     # approximate the latter with self-normalized importance sampling
-    approx_log_pz_x = log_py_z.log_softmax(-1)
+    #approx_log_pz_x = log_py_z.log_softmax(-1)
+    approx_log_pz_x = log_py_z.detach().log_softmax(-1)
     approx_log_qz_x = sampled_logits_qz_x.log_softmax(-1)
     p_q_kl = kl_divergence(
         Categorical(logits=approx_log_pz_x),
