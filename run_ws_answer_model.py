@@ -523,7 +523,7 @@ def main():
     encoder_name = args.model_dir.split("/")[-1]
     answer_model_name = args.answer_model_dir.split("/")[-1]
     run_name = (
-        f"encoder-answer-model-{args.prefix}-{encoder_name}-{answer_model_name} "
+        f"ws-encoder-answer-model-{args.prefix}-{encoder_name}-{answer_model_name} "
         f"lr-{args.learning_rate} "
         f"bs-{args.batch_size*args.gradient_accumulation_steps} "
         f"dt-{args.num_dialogue_turns} "
