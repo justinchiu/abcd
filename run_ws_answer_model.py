@@ -57,6 +57,7 @@ def get_args():
 
     parser.add_argument("--true_z", action="store_true")
     parser.add_argument("--kl_weight", default=1.0, type=float)
+    parser.add_argument("--kl_no_detach_p", action="store_true")
 
     parser.add_argument("--nolog", action="store_true")
     parser.add_argument("--no_save_model", action="store_true")
@@ -334,7 +335,7 @@ def prepare_dataloader(tokenizer, args):
     return train_dataloader, valid_dataloader, tokenized_docs
 
 
-def run_model(batch, docs, encoder, model, num_z=4, supervised=False, true_z=False, kl_weight=1.0):
+def run_model(batch, docs, encoder, model, num_z=4, supervised=False, true_z=False, kl_weight=1.0, detach_p_kl=True):
     x_ids = batch["x_ids"].to(device)
     x_mask = batch["x_mask"].to(device)
     z_labels = batch["doc_labels"].to(device)
@@ -395,7 +396,7 @@ def run_model(batch, docs, encoder, model, num_z=4, supervised=False, true_z=Fal
     # loss = logsumexp_z log p(y|z) - KL[p(z|x) || q(z|x)]
     # approximate the latter with self-normalized importance sampling
     #approx_log_pz_x = log_py_z.log_softmax(-1)
-    approx_log_pz_x = log_py_z.detach().log_softmax(-1)
+    approx_log_pz_x = (log_py_z.detach() if detach_p_kl else log_py_z).log_softmax(-1)
     approx_log_qz_x = sampled_logits_qz_x.log_softmax(-1)
     p_q_kl = kl_divergence(
         Categorical(logits=approx_log_pz_x),
@@ -533,6 +534,7 @@ def main():
         f"k-{args.num_z_samples} "
         f"tz-{args.true_z} "
         f"kl-{args.kl_weight} "
+        f"ndp-{args.kl_no_detach_p} "
     )
     args.run_name = run_name
     print(run_name)
@@ -631,6 +633,7 @@ def main():
                 supervised=completed_steps * args.batch_size < args.supervised_examples,
                 true_z=args.true_z,
                 kl_weight=args.kl_weight,
+                detach_p_kl=not args.kl_no_detach_p,
             )
             loss.backward()
             if (
