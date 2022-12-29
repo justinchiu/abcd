@@ -555,6 +555,9 @@ def main():
                     )
                 if valid_loss < best_valid:
                     best_valid = valid_loss
+                    if not args.nolog:
+                        wandb.run.summary["best_valid_loss"] = valid_loss
+                        wandb.run.summary["best_valid_step"] = completed_steps
                     if not args.no_save_model:
                         answer_model.save_pretrained(
                             f"{args.output_model_dir}/{run_name}-answer"
