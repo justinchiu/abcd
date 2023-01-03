@@ -2,13 +2,23 @@ from typing import List
 from collections import defaultdict, Counter
 import json
 from pathlib import Path
-import torch
 
 import pdb
 
 from datasets import Dataset
 
+import torch
+from torch.utils.data import DataLoader
+
 from utils.manual_map import flow_map, subflow_map
+
+
+start_customer_token = "custom"
+customer_token = "Ġcustomer"
+start_agent_token = "agent"
+agent_token = "Ġagent"
+action_token = "Ġaction"
+
 
 Sentence = str
 
@@ -138,3 +148,132 @@ def get_abcd_dataset(
         )
     )
     return dataset, docs, subflow_map
+
+
+def prepare_dataloader(tokenizer, args, device):
+    train_dataset, docs, subflow_map = get_abcd_dataset(
+        "train",
+        args.num_dialogue_turns,
+        args.num_doc_sents,
+        truncate_early=args.truncate_early,
+    )
+    valid_dataset, _, _ = get_abcd_dataset(
+        "dev",
+        args.num_dialogue_turns,
+        args.num_doc_sents,
+        truncate_early=args.truncate_early,
+    )
+
+    num_docs = len(docs)
+
+    padding_id = tokenizer.pad_token_id
+
+    (
+        start_customer_id,
+        customer_id,
+        start_agent_id,
+        agent_id,
+        action_id,
+    ) = tokenizer.convert_tokens_to_ids(
+        [
+            start_customer_token,
+            customer_token,
+            start_agent_token,
+            agent_token,
+            action_token,
+        ]
+    )
+
+    tokenized_docs = tokenizer(
+        docs,
+        return_tensors="pt",
+        padding="max_length",
+        truncation=True,
+        max_length=args.max_length,
+    ).to(device)
+
+    def convert_to_features(example_batch):
+        tokenized_x = tokenizer(
+            example_batch["xs"],
+            return_tensors="pt",
+            padding="max_length",
+            truncation=True,
+            max_length=args.max_length,
+        )
+        x_ids = tokenized_x.input_ids
+        x_mask = tokenized_x.attention_mask
+        # x_ids[x_ids == padding_id] = -100
+        # the -100 is for NLLCriterion, but we manually select non-padding
+
+        # GET TURN INDICES
+        # True if conversation starts with agent
+        # first token is bos <s>
+        agent_start = x_ids[:, 1] == start_agent_id
+
+        # make sure all start-of-turn tokens have a trailing comma,
+        # "Gagent:" and "Gcustomer:"
+        # If agent does not have trailing colon, it may be due to truncation.
+        # Customer is a valid word, so may not have a trailing colon,
+        # eg "welcome to customer service".
+        colon_id = tokenizer.convert_tokens_to_ids(":")
+        is_next_token_colon = torch.zeros_like(x_ids, dtype=bool)
+        is_next_token_colon[:, :-1] = x_ids[:, 1:] == colon_id
+
+        customer_turn = (x_ids == customer_id) & is_next_token_colon
+        agent_turn = (x_ids == agent_id) & is_next_token_colon
+        agent_turn[:, 1] = agent_start
+        customer_turn[:, 1] = ~agent_start
+        action_turn = (x_ids == action_id) & is_next_token_colon
+        turn_locations = customer_turn | agent_turn | action_turn
+
+        doc_labels = example_batch["doc_labels"]
+        doc_negatives = example_batch["doc_negatives"]
+
+        encodings = {
+            "x_ids": x_ids,
+            "x_mask": x_mask,
+            "ids": example_batch["ids"],
+            "doc_labels": doc_labels,
+            "agent_turn_mask": agent_turn,
+            "customer_turn_mask": customer_turn,
+            "action_turn_mask": action_turn,
+        }
+        return encodings
+
+    def process_dataset(dataset):
+        dataset = dataset.map(convert_to_features, batched=True)
+        columns = [
+            "x_ids",
+            "x_mask",
+            "ids",
+            "doc_labels",
+            "agent_turn_mask",
+            "customer_turn_mask",
+            "action_turn_mask",
+        ]
+        dataset.set_format(type="torch", columns=columns, output_all_columns=False)
+        return dataset
+
+    train = process_dataset(train_dataset)
+    valid = process_dataset(valid_dataset)
+
+    train_dataloader = DataLoader(
+        train,
+        batch_size=args.batch_size,
+        drop_last=False,
+        shuffle=True,
+        pin_memory=torch.cuda.is_available(),
+        pin_memory_device=str(device),
+    )
+
+    valid_dataloader = DataLoader(
+        valid,
+        batch_size=args.eval_batch_size,
+        drop_last=False,
+        shuffle=False,
+        pin_memory=torch.cuda.is_available(),
+        pin_memory_device=str(device),
+    )
+
+    return train_dataloader, valid_dataloader, tokenized_docs
+
