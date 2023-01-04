@@ -2,6 +2,7 @@ from typing import List
 from collections import defaultdict, Counter
 import json
 from pathlib import Path
+import random
 
 import pdb
 
@@ -144,13 +145,14 @@ def get_abcd_dataset(
             doc_labels=doc_labels,
             doc_negatives=doc_negatives,
             ids=ids,
+            flows=flows,
             subflows=subflows,
         )
     )
     return dataset, docs, subflow_map
 
 
-def prepare_dataloader(tokenizer, args, device):
+def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
     train_dataset, docs, subflow_map = get_abcd_dataset(
         "train",
         args.num_dialogue_turns,
@@ -229,11 +231,26 @@ def prepare_dataloader(tokenizer, args, device):
         doc_labels = example_batch["doc_labels"]
         doc_negatives = example_batch["doc_negatives"]
 
+        # ONLY FOR ORACLE Z*
+        random_negatives = []
+        s = set(range(num_docs))
+        for i, (label, negs) in enumerate(zip(doc_labels, doc_negatives)):
+            this_s = s.difference(set(negs + [label]))
+            negatives = random.sample(list(this_s), args.num_negatives)
+            random_negatives.append(list(negatives))
+
+        doc_idxs = [
+            rnegs + negs + [label]
+            for rnegs, negs, label in zip(random_negatives, doc_negatives, doc_labels)
+        ]
+        # / ORACLE Z*
+
         encodings = {
             "x_ids": x_ids,
             "x_mask": x_mask,
             "ids": example_batch["ids"],
             "doc_labels": doc_labels,
+            "doc_idxs": doc_idxs, # ONLY FOR ORACLE Z*
             "agent_turn_mask": agent_turn,
             "customer_turn_mask": customer_turn,
             "action_turn_mask": action_turn,
@@ -247,6 +264,7 @@ def prepare_dataloader(tokenizer, args, device):
             "x_mask",
             "ids",
             "doc_labels",
+            "doc_idxs", # ONLY FOR ORACLE Z*
             "agent_turn_mask",
             "customer_turn_mask",
             "action_turn_mask",
@@ -256,6 +274,36 @@ def prepare_dataloader(tokenizer, args, device):
 
     train = process_dataset(train_dataset)
     valid = process_dataset(valid_dataset)
+
+    # subsampling
+    if subsample == "flow":
+        map_idxs = {
+            flow: [i for i, ex in enumerate(train_dataset) if ex["flows"] == flow]
+            for flow in flow_map.keys()
+        }
+    elif subsample == "subflow":
+        map_idxs = {
+            subflow: [i for i, ex in enumerate(train_dataset) if ex["subflows"] == subflow]
+            for subflow in subflow_map.keys()
+        }
+    else:
+        raise ValueError(f"subsample must be flow or subflow, instead was {subsample}")
+
+    subsampled_list = [
+        train_dataset[i]
+        for idxs in map_idxs.values()
+        for i in random.sample(idxs, k)
+    ]
+    subsampled_dataset = process_dataset(Dataset.from_list(subsampled_list))
+    subsampled_dataloader = DataLoader(
+        subsampled_dataset,
+        batch_size=args.subsampled_batch_size,
+        drop_last=False,
+        shuffle=True,
+        pin_memory=torch.cuda.is_available(),
+        pin_memory_device=str(device),
+    )
+    # / subsampling
 
     train_dataloader = DataLoader(
         train,
@@ -275,5 +323,5 @@ def prepare_dataloader(tokenizer, args, device):
         pin_memory_device=str(device),
     )
 
-    return train_dataloader, valid_dataloader, tokenized_docs
+    return train_dataloader, valid_dataloader, subsampled_dataloader, tokenized_docs
 
