@@ -1,3 +1,5 @@
+# VAE SETTING DOES NOT WORK AS WELL
+ 
 import argparse
 from collections import Counter
 from dataclasses import dataclass
