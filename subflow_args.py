@@ -45,18 +45,18 @@ def get_args():
         help="number of steps between each evaluation.",
     )
     parser.add_argument(
-        "--supervised_examples",
-        default=0,
-        type=int,
-        help="number of fully supervised training examples for q(z|x) and p(x|z). "
-        "this should be as small as possible",
+        "--subsample",
+        default="subflow",
+        choices=["flow", "subflow"],
+        help="granularity of subsampling for semisupervised learning",
     )
     parser.add_argument(
-        "--q_warmup_steps",
+        "--subsample_k",
         default=0,
         type=int,
-        help="number of q warmup steps",
+        help="number of supervised examples from each subsampled category. 0 means unsupervised.",
     )
+
     parser.add_argument(
         "--epoch",
         "-epoch",

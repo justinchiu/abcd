@@ -276,33 +276,35 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
     valid = process_dataset(valid_dataset)
 
     # subsampling
-    if subsample == "flow":
-        map_idxs = {
-            flow: [i for i, ex in enumerate(train_dataset) if ex["flows"] == flow]
-            for flow in flow_map.keys()
-        }
-    elif subsample == "subflow":
-        map_idxs = {
-            subflow: [i for i, ex in enumerate(train_dataset) if ex["subflows"] == subflow]
-            for subflow in subflow_map.keys()
-        }
-    else:
-        raise ValueError(f"subsample must be flow or subflow, instead was {subsample}")
+    subsampled_dataloader = None
+    if k > 0:
+        if subsample == "flow":
+            map_idxs = {
+                flow: [i for i, ex in enumerate(train_dataset) if ex["flows"] == flow]
+                for flow in flow_map.keys()
+            }
+        elif subsample == "subflow":
+            map_idxs = {
+                subflow: [i for i, ex in enumerate(train_dataset) if ex["subflows"] == subflow]
+                for subflow in subflow_map.keys()
+            }
+        else:
+            raise ValueError(f"subsample must be flow or subflow, instead was {subsample}")
 
-    subsampled_list = [
-        train_dataset[i]
-        for idxs in map_idxs.values()
-        for i in random.sample(idxs, k)
-    ]
-    subsampled_dataset = process_dataset(Dataset.from_list(subsampled_list))
-    subsampled_dataloader = DataLoader(
-        subsampled_dataset,
-        batch_size=args.subsampled_batch_size,
-        drop_last=False,
-        shuffle=True,
-        pin_memory=torch.cuda.is_available(),
-        pin_memory_device=str(device),
-    )
+        subsampled_list = [
+            train_dataset[i]
+            for idxs in map_idxs.values()
+            for i in random.sample(idxs, k)
+        ]
+        subsampled_dataset = process_dataset(Dataset.from_list(subsampled_list))
+        subsampled_dataloader = DataLoader(
+            subsampled_dataset,
+            batch_size=args.subsampled_batch_size,
+            drop_last=False,
+            shuffle=True,
+            pin_memory=torch.cuda.is_available(),
+            pin_memory_device=str(device),
+        )
     # / subsampling
 
     train_dataloader = DataLoader(

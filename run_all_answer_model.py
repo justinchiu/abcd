@@ -184,6 +184,8 @@ def main():
         answer_tokenizer,
         args,
         device,
+        subsample=args.subsample,
+        k=args.subsample_k,
     )
 
     num_update_steps_per_epoch = math.ceil(
