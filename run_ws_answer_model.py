@@ -30,7 +30,7 @@ from torch import nn
 from torch.distributions.kl import kl_divergence
 from torch.distributions import Categorical
 
-from eba_utils import prepare_optim_and_scheduler
+from eba_utils import prepare_optim_and_scheduler, prepare_optim_and_scheduler2
 from subflow_args import get_args
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -121,6 +121,53 @@ def run_model(batch, docs, encoder, model, num_z=4, supervised=False, true_z=Fal
         loss = neg_log_qz - log_py_z.log_softmax(-1)[correct_z_mask].mean()
 
     return loss, log_qz_x, tok_loss
+
+
+def run_supervised(batch, docs, encoder, model):
+    x_ids = batch["x_ids"].to(device)
+    x_mask = batch["x_mask"].to(device)
+    z_labels = batch["doc_labels"].to(device)
+
+    z_ids = docs.input_ids
+    z_mask = docs.attention_mask
+
+    total_num_z, z_len = z_ids.shape
+    bsz, x_len = x_ids.shape
+
+    # encoder and log q(z|x)
+    x_out = encoder(input_ids=x_ids, attention_mask=x_mask)
+    z_out = encoder(input_ids=z_ids, attention_mask=z_mask)
+
+    score_z_x = torch.einsum("xh,zh->xz", x_out.pooler_output, z_out.pooler_output)
+    logits_qz_x = (score_z_x / 32)
+
+    log_qz_x = logits_qz_x.log_softmax(-1)
+    neg_log_qz = -log_qz_x[torch.arange(bsz), z_labels].mean()
+
+    # only run p(x|z) on the true z
+     
+    num_z, z_len = z_ids.shape
+
+    # bsz x x_len
+
+    labels = x_ids
+
+    out = model(
+        input_ids=z_ids[z_labels],
+        attention_mask=z_mask[z_labels],
+        labels=labels,
+    )
+    logits = out.logits.log_softmax(-1)
+    N, T, V = logits.shape
+    tok_loss = logits[torch.arange(N)[:,None], torch.arange(T), labels]
+    tok_loss[~x_mask.bool()] = 0
+    log_py_z = tok_loss.sum(-1)
+    neg_log_py = -log_py_z.mean()
+
+    loss = neg_log_py + neg_log_qz
+
+    return loss, log_qz_x, tok_loss
+
 
 
 def evaluate(steps, args, encoder, model, dataloader, docs, split):
@@ -244,6 +291,10 @@ def main():
         f"ml-{args.max_length} "
         f"k-{args.num_z_samples} "
         f"tz-{args.true_z} "
+        f"s-{args.subsample} "
+        f"sk-{args.subsample_k} "
+        f"ss-{args.subsample_steps} "
+        f"sp-{args.subsample_passes} "
     )
     args.run_name = run_name
     print(run_name)
@@ -305,6 +356,12 @@ def main():
     total_batch_size = args.batch_size * args.gradient_accumulation_steps
     optim, lr_scheduler = prepare_optim_and_scheduler([encoder, answer_model], args)
 
+    # subsample
+    s_completed_steps = 0
+    s_optim, s_lr_scheduler = prepare_optim_and_scheduler2([answer_model], args,
+        args.max_train_steps // args.subsample_steps * args.subsample_passes)
+    # / subsample
+
     progress_bar = tqdm(range(args.max_train_steps))
     best_valid = float("inf")
     completed_steps = 0
@@ -312,6 +369,24 @@ def main():
     answer_model.train()
     for epoch in range(args.epoch):
         for step, batch in enumerate(train_dataloader):
+            # subsample
+            if completed_steps % args.subsample_steps == 0:
+                print("Running supervised")
+                for s_epoch in range(args.subsample_passes):
+                    for s_step, s_batch in enumerate(subsample_dataloader):
+                        s_loss, _, _ = run_supervised(s_batch, docs, encoder, answer_model)
+                        s_loss.backward()
+                        s_optim.step()
+                        s_optim.zero_grad()
+                        s_completed_steps += 1
+                        if not args.nolog:
+                            wandb.log({
+                                "supervised step": s_completed_steps,
+                                "supervised train Loss": s_loss.item()
+                            })
+                    s_lr_scheduler.step()
+            # / subsample
+             
             if (
                 completed_steps % args.eval_steps == 0
                 and completed_steps > 0
@@ -346,7 +421,7 @@ def main():
             loss, log_qz_x, log_py_z = run_model(
                 batch, docs, encoder, answer_model, num_z=args.num_z_samples,
                 supervised=False,
-                true_z=args.true_z,
+                true_z=False,
             )
             loss.backward()
             if (

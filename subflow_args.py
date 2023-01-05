@@ -35,14 +35,10 @@ def get_args():
     parser.add_argument(
         "--eval_batch_size", default=32, type=int, help="eval batch size per gpu."
     )
+
+    # subsample args
     parser.add_argument(
         "--subsampled_batch_size", default=16, type=int, help="batch size per gpu."
-    )
-    parser.add_argument(
-        "--eval_steps",
-        default=5000,
-        type=int,
-        help="number of steps between each evaluation.",
     )
     parser.add_argument(
         "--subsample",
@@ -57,6 +53,26 @@ def get_args():
         help="number of supervised examples from each subsampled category. 0 means unsupervised.",
     )
 
+    parser.add_argument(
+        "--subsample_passes",
+        default=0,
+        type=int,
+        help="number of passes through supervised examples each time. 0 means unsupervised.",
+    )
+    parser.add_argument(
+        "--subsample_steps",
+        default=250,
+        type=int,
+        help="number of passes through supervised examples each time. 0 means unsupervised.",
+    )
+    # / subsample
+
+    parser.add_argument(
+        "--eval_steps",
+        default=250,
+        type=int,
+        help="number of steps between each evaluation.",
+    )
     parser.add_argument(
         "--epoch",
         "-epoch",

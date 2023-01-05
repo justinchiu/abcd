@@ -26,7 +26,7 @@ from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch import nn
 
-from eba_utils import prepare_optim_and_scheduler
+from eba_utils import prepare_optim_and_scheduler, prepare_optim_and_scheduler2
 from subflow_args import get_args
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -71,6 +71,39 @@ def run_model(batch, docs, model):
     tok_loss[~x_mask.bool()[:, None].expand(bsz, num_z, T)] = 0
     log_py_z = tok_loss.sum(-1)
     neg_log_py = -log_py_z.logsumexp(-1).mean()
+    return neg_log_py, tok_loss
+
+def run_supervised(batch, docs, model):
+    # only run p(x|z) on the true z
+     
+    x_ids = batch["x_ids"].to(device)
+    x_mask = batch["x_mask"].to(device)
+
+    z = batch["doc_labels"].to(device)
+
+    bsz, x_len = x_ids.shape
+
+    z_ids = docs.input_ids
+    z_mask = docs.attention_mask
+
+    num_z, z_len = z_ids.shape
+
+    # bsz x x_len
+
+    labels = x_ids
+
+    out = model(
+        input_ids=z_ids[z],
+        attention_mask=z_mask[z],
+        labels=labels,
+    )
+    logits = out.logits.log_softmax(-1)
+    N, T, V = logits.shape
+    tok_loss = logits[torch.arange(N)[:,None], torch.arange(T), labels]
+    tok_loss[~x_mask.bool()] = 0
+    log_py_z = tok_loss.sum(-1)
+    neg_log_py = -log_py_z.mean()
+
     return neg_log_py, tok_loss
 
 
@@ -172,6 +205,10 @@ def main():
         f"dt-{args.num_dialogue_turns} "
         f"ds-{args.num_doc_sents} "
         f"ml-{args.max_length} "
+        f"s-{args.subsample} "
+        f"sk-{args.subsample_k} "
+        f"ss-{args.subsample_steps} "
+        f"sp-{args.subsample_passes} "
     )
     args.run_name = run_name
 
@@ -223,11 +260,35 @@ def main():
     progress_bar = tqdm(range(args.max_train_steps))
     completed_steps = 0
 
+    # subsample
+    s_completed_steps = 0
+    s_optim, s_lr_scheduler = prepare_optim_and_scheduler2([answer_model], args,
+        args.max_train_steps // args.subsample_steps * args.subsample_passes)
+    # / subsample
+
     # best_valid = float("-inf")
     best_valid = float("inf")
     answer_model.train()
     for epoch in range(args.epoch):
         for step, batch in enumerate(train_dataloader):
+            # subsample
+            if completed_steps % args.subsample_steps == 0:
+                print("Running supervised")
+                for s_epoch in range(args.subsample_passes):
+                    for s_step, s_batch in enumerate(subsample_dataloader):
+                        s_loss, _ = run_supervised(s_batch, docs, answer_model)
+                        s_loss.backward()
+                        s_optim.step()
+                        s_optim.zero_grad()
+                        s_completed_steps += 1
+                        if not args.nolog:
+                            wandb.log({
+                                "supervised step": s_completed_steps,
+                                "supervised train Loss": s_loss.item()
+                            })
+                    s_lr_scheduler.step()
+            # / subsample
+
             if (
                 completed_steps % args.eval_steps == 0
                 and completed_steps > 0

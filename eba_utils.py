@@ -208,6 +208,39 @@ def prepare_optim_and_scheduler(all_layers, args):
     )
     return optim, lr_scheduler
 
+def prepare_optim_and_scheduler2(all_layers, args, max_train_steps):
+    no_decay = ["bias", "LayerNorm.weight"]
+    optimizer_grouped_parameters = []
+    for layer in all_layers:
+        curr = [
+            {
+                "params": [
+                    p
+                    for n, p in layer.named_parameters()
+                    if not any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": args.weight_decay,
+            },
+            {
+                "params": [
+                    p
+                    for n, p in layer.named_parameters()
+                    if any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": 0.0,
+            },
+        ]
+        optimizer_grouped_parameters += curr
+
+    optim = AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
+    lr_scheduler = get_scheduler(
+        name=args.lr_scheduler_type,
+        optimizer=optim,
+        num_warmup_steps=int(args.warmup_ratio * max_train_steps),
+        num_training_steps=max_train_steps,
+    )
+    return optim, lr_scheduler
+
 
 def prepare_linear(size):
     linear = nn.Linear(size, 1)
