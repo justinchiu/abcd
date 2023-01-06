@@ -370,7 +370,10 @@ def main():
     for epoch in range(args.epoch):
         for step, batch in enumerate(train_dataloader):
             # subsample
-            if completed_steps % args.subsample_steps == 0:
+            if (
+                completed_steps % args.subsample_steps == 0
+                and step % args.gradient_accumulation_steps == 0
+            ):
                 print("Running supervised")
                 for s_epoch in range(args.subsample_passes):
                     for s_step, s_batch in enumerate(subsample_dataloader):
