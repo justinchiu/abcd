@@ -99,7 +99,8 @@ def run_model(batch, docs, encoder, model, num_z=4, supervised=False, true_z=Fal
     tok_loss = logits[torch.arange(N)[:, None], torch.arange(T), labels].view(
         bsz, num_z, T
     )
-    tok_loss[~x_mask.bool()[:, None].expand(bsz, num_z, T)] = 0
+    #tok_loss[~x_mask.bool()[:, None].expand(bsz, num_z, T)] = 0
+    tok_loss = tok_loss.masked_fill(~x_mask.bool()[:, None].expand(bsz, num_z, T), 0)
     log_py_z = tok_loss.sum(-1)
     log_py = log_py_z.logsumexp(-1)
     neg_log_py = -log_py.mean()
@@ -307,7 +308,7 @@ def main():
     answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)
     answer_model = answer_model.to(device)
 
-    train_dataloader, eval_dataloader, subsample_dataloader, docs = prepare_dataloader(
+    train_dataloader, eval_dataloader, subsample_dataloader, docs, _, _ = prepare_dataloader(
         answer_tokenizer,
         args,
         device,
@@ -377,7 +378,12 @@ def main():
                 print("Running supervised")
                 for s_epoch in range(args.subsample_passes):
                     for s_step, s_batch in enumerate(subsample_dataloader):
-                        s_loss, _, _ = run_supervised(s_batch, docs, encoder, answer_model)
+                        #s_loss, _, _ = run_supervised(s_batch, docs, encoder, answer_model)
+                        s_loss, _, _ = run_model(
+                            batch, docs, encoder, answer_model, num_z=args.num_z_samples,
+                            supervised=True,
+                            true_z=True,
+                        )
                         s_loss.backward()
                         s_optim.step()
                         s_optim.zero_grad()
@@ -421,7 +427,7 @@ def main():
                         )
                 encoder.train()
                 answer_model.train()
-            loss, log_qz_x, log_py_z = run_model(
+            loss, _, _ = run_model(
                 batch, docs, encoder, answer_model, num_z=args.num_z_samples,
                 supervised=False,
                 true_z=False,

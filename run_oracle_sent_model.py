@@ -16,7 +16,6 @@ import pdb
 from datasets import load_metric
 from torch.utils.data.sampler import BatchSampler, RandomSampler
 
-
 from subflow_data import prepare_dataloader
 from rich.progress import track
 from transformers import AutoModel, AutoModelForSeq2SeqLM
@@ -27,13 +26,14 @@ from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch import nn
 
-from eba_utils import prepare_optim_and_scheduler
+from eba_utils import prepare_optim_and_scheduler, prepare_optim_and_scheduler2
 from subflow_args import get_args
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 seed = 555
 set_seed(seed)
 
+torch.autograd.set_detect_anomaly(True)
 
 start_customer_token = "custom"
 customer_token = "Ġcustomer"
@@ -42,29 +42,34 @@ agent_token = "Ġagent"
 action_token = "Ġaction"
 
 
-def run_model(batch, docs, model):
+def run_model(batch, docs, doc_sents, doc_num_sents, model):
     x_ids = batch["x_ids"].to(device)
     x_mask = batch["x_mask"].to(device)
-    z_idxs = batch["doc_idxs"].to(device)
 
     bsz, x_len = x_ids.shape
 
     z_ids = docs.input_ids
     z_mask = docs.attention_mask
 
-    bsz, num_z = z_idxs.shape
-    total_num_z, z_len = z_ids.shape
+    doc_labels = batch["doc_labels"]
 
-    z = z_ids[z_idxs]
-    mask = z_mask[z_idxs]
+    num_docs, doc_len = z_ids.shape
+
+    z_len = doc_sents.input_ids.shape[-1]
+    sent_ids = doc_sents.input_ids.view(num_docs, -1, z_len)
+    sent_mask = doc_sents.attention_mask.view(num_docs, -1, z_len)
+
+    num_z = sent_ids.shape[1]
+
+    # bsz x num_z x x_len
 
     labels = (
-        x_ids[:, None].expand(bsz, num_z, x_len).contiguous().view(bsz * num_z, x_len)
+        x_ids[:, None].repeat(1, num_z, 1).view(bsz * num_z, x_len)
     )
 
     out = model(
-        input_ids=z.view(bsz * num_z, z_len),
-        attention_mask=mask.view(bsz * num_z, z_len),
+        input_ids=sent_ids[doc_labels].view(bsz * num_z, z_len),
+        attention_mask=sent_mask[doc_labels].view(bsz * num_z, z_len),
         labels=labels,
     )
     logits = out.logits.log_softmax(-1)
@@ -72,17 +77,34 @@ def run_model(batch, docs, model):
     tok_loss = logits[torch.arange(N)[:, None], torch.arange(T), labels].view(
         bsz, num_z, T
     )
-    tok_loss[~x_mask.bool()[:, None].expand(bsz, num_z, T)] = 0
-    log_py_z = tok_loss.sum(-1)
-    neg_log_py = -log_py_z.logsumexp(-1).mean()
+    #tok_loss[~x_mask.bool()[:, None].expand(bsz, num_z, T)] = 0
+    tok_loss = tok_loss.masked_fill(~x_mask.bool()[:, None].expand(bsz, num_z, T), 0)
+
+    turn_mask = batch["agent_turn_mask"] | batch["customer_turn_mask"] | batch["action_turn_mask"]
+    turn_mask = turn_mask[:,None,:].repeat(1, num_z, 1)
+    turn_numbers = turn_mask.cumsum(-1)
+
+    loss_buffer = torch.zeros_like(tok_loss)
+    loss_out = torch.scatter_add(loss_buffer, -1, turn_numbers.to(device), tok_loss)
+
+    turn_logprobs = loss_out.logsumexp(1)
+
+    turn_mask = torch.arange(x_len) <= turn_numbers[:,0,-1,None]
+
+    #turn_logprobs[~turn_mask.to(device)] = 0
+    #conversation_logprob = turn_logprobs.sum(-1)
+    conversation_logprob = turn_logprobs.masked_fill(~turn_mask.to(device), 0).sum(-1)
+    neg_log_py = -conversation_logprob.mean()
+
+    #import pdb; pdb.set_trace()
+
     return neg_log_py, tok_loss
 
 
-def evaluate(steps, args, model, dataloader, docs, split):
+def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, split):
     y_nll = 0
     num_examples = 0
     acc_metric = load_metric("accuracy")
-    contrastive_acc_metric = load_metric("accuracy")
     first_action_acc_metric = load_metric("accuracy")
 
     if not args.no_save_results and split == "Valid":
@@ -91,14 +113,12 @@ def evaluate(steps, args, model, dataloader, docs, split):
         doc_golds = []
 
     num_docs = docs.input_ids.shape[0]
-    z_idxs = torch.arange(num_docs, device=device, dtype=torch.int64)
     # for step, batch in enumerate(dataloader):
     for step, batch in track(enumerate(dataloader), total=len(dataloader)):
-        doc_idxs = batch["doc_idxs"].to(device)
-        bsz, num_z = doc_idxs.shape
+        bsz = batch["x_ids"].shape[0]
+        num_z = num_docs
 
-        batch["doc_idxs"] = z_idxs[None].expand(bsz, num_docs)
-        loss, log_py_z = run_model(batch, docs, model)
+        loss, log_py_z = run_model(batch, docs, doc_sents, doc_num_sents, model)
 
         y_nll += loss * bsz
         num_examples += bsz
@@ -106,13 +126,10 @@ def evaluate(steps, args, model, dataloader, docs, split):
         # log_py_z: bsz x num_z x time
         cum_log_py_z = log_py_z.cumsum(-1)
         z_hat = cum_log_py_z.argmax(1)
-        contrastive_scores = cum_log_py_z[torch.arange(bsz)[:, None], doc_idxs]
-        z_hat_contrastive = contrastive_scores.argmax(1)
 
         # index into start of agent turns
         agent_mask = batch["agent_turn_mask"]
         agent_z_hat = z_hat[agent_mask]
-        agent_z_hat_contrastive = z_hat_contrastive[agent_mask]
 
         action_mask = batch["action_turn_mask"]
         first_action_mask = action_mask.cumsum(1).cumsum(1) == 1
@@ -129,23 +146,17 @@ def evaluate(steps, args, model, dataloader, docs, split):
             predictions=agent_z_hat,
             references=doc_labels,
         )
-        contrastive_acc_metric.add_batch(
-            predictions=agent_z_hat_contrastive,
-            references=[num_z - 1] * sum(num_agent_turns),
-        )
         first_action_acc_metric.add_batch(
             predictions=action_z_hat,
             references=batch["doc_labels"],
         )
 
         if not args.no_save_results and split == "Valid":
-            con_docs.append(doc_idxs.cpu())
-            doc_preds.append(cum_log_py_z.cpu())
+            doc_preds.append(log_py_z.cpu())
             doc_golds.append(batch["doc_labels"].cpu())
 
     avg_loss = y_nll.item() / num_examples
     z_acc = acc_metric.compute()
-    z_con_acc = contrastive_acc_metric.compute()
     z_first_action_acc = first_action_acc_metric.compute()
 
     if not args.nolog:
@@ -155,13 +166,11 @@ def evaluate(steps, args, model, dataloader, docs, split):
                 f"{split} Answer NLL": avg_loss,
                 f"{split} Subflow Acc": z_acc,
                 f"{split} Subflow First action Acc": z_first_action_acc,
-                f"{split} Contrastive Subflow Acc": z_con_acc,
             }
         )
     if not args.no_save_results and split == "Valid":
         torch.save(
             (
-                con_docs,
                 doc_preds,
                 doc_golds,
             ),
@@ -172,8 +181,6 @@ def evaluate(steps, args, model, dataloader, docs, split):
     print(avg_loss)
     print("z acc")
     print(z_acc)
-    print("z contrastive acc")
-    print(z_con_acc)
     print("z first action acc")
     print(z_first_action_acc)
 
@@ -186,26 +193,34 @@ def main():
 
     model_name = args.answer_model_dir.split("/")[-1]
     run_name = (
-        f"answer-model-{args.prefix}-{model_name} "
+        f"oracle-sent-model-{args.prefix}-{model_name} "
         f"lr-{args.learning_rate} "
         f"bs-{args.batch_size*args.gradient_accumulation_steps} "
         f"dt-{args.num_dialogue_turns} "
         f"ds-{args.num_doc_sents} "
         f"ml-{args.max_length} "
-        f"k-{args.num_negatives} "
-        f"hn-3"
+        f"s-{args.subsample} "
+        f"sk-{args.subsample_k} "
+        f"ss-{args.subsample_steps} "
+        f"sp-{args.subsample_passes} "
     )
     args.run_name = run_name
 
     # answer_model_dir = args.answer_model_dir if not load_answer else load_answer
-    # answer_model = AutoModelForSeq2SeqLM.from_pretrained(answer_model_dir)
-    answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)
+    #answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)
+    answer_model_dir = "saved_models/ws-encoder-answer-model-14-s-roberta-base-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 k-16 tz-False s-subflow sk-3 ss-250 sp-4 -answer"
+    answer_model = AutoModelForSeq2SeqLM.from_pretrained(answer_model_dir)
     answer_model = answer_model.to(device)
 
-    train_dataloader, eval_dataloader, subsampled_dataloader, docs, _, _ = prepare_dataloader(
+    (
+        train_dataloader, eval_dataloader, subsample_dataloader,
+        docs, doc_sents, doc_num_sents,
+    ) = prepare_dataloader(
         answer_tokenizer,
         args,
         device,
+        subsample=args.subsample,
+        k=args.subsample_k,
     )
 
     num_update_steps_per_epoch = math.ceil(
@@ -235,6 +250,8 @@ def main():
                 args=args,
                 model=answer_model,
                 docs=docs,
+                doc_sents=doc_sents,
+                doc_num_sents=doc_num_sents,
                 dataloader=eval_dataloader,
                 split="Valid",
             )
@@ -242,6 +259,12 @@ def main():
 
     progress_bar = tqdm(range(args.max_train_steps))
     completed_steps = 0
+
+    # subsample
+    s_completed_steps = 0
+    s_optim, s_lr_scheduler = prepare_optim_and_scheduler2([answer_model], args,
+        args.max_train_steps // args.subsample_steps * args.subsample_passes)
+    # / subsample
 
     # best_valid = float("-inf")
     best_valid = float("inf")
@@ -273,7 +296,7 @@ def main():
                             f"{args.output_model_dir}/{run_name}-answer"
                         )
                 answer_model.train()
-            loss, _ = run_model(batch, docs, answer_model)
+            loss, _ = run_model(batch, docs, doc_sents, doc_num_sents, answer_model)
             loss.backward()
             if (
                 step % args.gradient_accumulation_steps == 0

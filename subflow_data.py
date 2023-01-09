@@ -96,12 +96,12 @@ def get_abcd_dataset(
     with open(f"eba_data/hard_negatives_k3.json", "r") as fin:
         negatives = json.load(fin)
 
-    docs, subflow_map = convert_manual(ontology, manual, lower)
+    doc_sents, subflow_map = convert_manual(ontology, manual, lower)
 
     # truncate docs
     if num_doc_sents > 0:
-        docs = [doc[:num_doc_sents] for doc in docs]
-    docs = [" ".join(doc) for doc in docs]
+        docs = [sents[:num_doc_sents] for sents in doc_sents]
+    docs = [" ".join(sents) for sents in doc_sents]
 
     xs, doc_labels, doc_negatives = [], [], []
     ids, flows, subflows = [], [], []
@@ -149,17 +149,17 @@ def get_abcd_dataset(
             subflows=subflows,
         )
     )
-    return dataset, docs, subflow_map
+    return dataset, docs, doc_sents, subflow_map
 
 
 def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
-    train_dataset, docs, subflow_map = get_abcd_dataset(
+    train_dataset, docs, doc_sents, subflow_map = get_abcd_dataset(
         "train",
         args.num_dialogue_turns,
         args.num_doc_sents,
         truncate_early=args.truncate_early,
     )
-    valid_dataset, _, _ = get_abcd_dataset(
+    valid_dataset, _, _, _ = get_abcd_dataset(
         "dev",
         args.num_dialogue_turns,
         args.num_doc_sents,
@@ -188,6 +188,23 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
 
     tokenized_docs = tokenizer(
         docs,
+        return_tensors="pt",
+        padding="max_length",
+        truncation=True,
+        max_length=args.max_length,
+    ).to(device)
+
+    # pad doc_sents
+    def pad_sents(sents, length):
+        L = len(sents)
+        return sents if L == length else sents + [""] * (length - L)
+
+    doc_num_sents = [len(sents) for sents in doc_sents]
+    max_num_sents = max(doc_num_sents)
+    padded_doc_sents = [pad_sents(sents, max_num_sents) for sents in doc_sents]
+
+    tokenized_doc_sents = tokenizer(
+        [sent for sents in padded_doc_sents for sent in sents],
         return_tensors="pt",
         padding="max_length",
         truncation=True,
@@ -325,5 +342,8 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
         pin_memory_device=str(device),
     )
 
-    return train_dataloader, valid_dataloader, subsampled_dataloader, tokenized_docs
+    return (
+        train_dataloader, valid_dataloader, subsampled_dataloader,
+        tokenized_docs, tokenized_doc_sents, doc_num_sents,
+    )
 

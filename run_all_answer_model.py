@@ -68,7 +68,8 @@ def run_model(batch, docs, model):
     tok_loss = logits[torch.arange(N)[:, None], torch.arange(T), labels].view(
         bsz, num_z, T
     )
-    tok_loss[~x_mask.bool()[:, None].expand(bsz, num_z, T)] = 0
+    #tok_loss[~x_mask.bool()[:, None].expand(bsz, num_z, T)] = 0
+    tok_loss = tok_loss.masked_fill(~x_mask.bool()[:, None].expand(bsz, num_z, T), 0)
     log_py_z = tok_loss.sum(-1)
     neg_log_py = -log_py_z.logsumexp(-1).mean()
     return neg_log_py, tok_loss
@@ -217,7 +218,7 @@ def main():
     answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)
     answer_model = answer_model.to(device)
 
-    train_dataloader, eval_dataloader, subsample_dataloader, docs = prepare_dataloader(
+    train_dataloader, eval_dataloader, subsample_dataloader, docs, _, _ = prepare_dataloader(
         answer_tokenizer,
         args,
         device,
