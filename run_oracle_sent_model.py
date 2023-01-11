@@ -105,12 +105,10 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
     y_nll = 0
     num_examples = 0
     acc_metric = load_metric("accuracy")
-    first_action_acc_metric = load_metric("accuracy")
 
     if not args.no_save_results and split == "Valid":
-        con_docs = []
-        doc_preds = []
-        doc_golds = []
+        sent_preds = []
+        sent_golds = []
 
     num_docs = docs.input_ids.shape[0]
     # for step, batch in enumerate(dataloader):
@@ -283,6 +281,8 @@ def main():
                         args=args,
                         model=answer_model,
                         docs=docs,
+                        doc_sents=doc_sents,
+                        doc_num_sents=doc_num_sents,
                         dataloader=eval_dataloader,
                         split="Valid",
                     )

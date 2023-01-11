@@ -378,12 +378,12 @@ def main():
                 print("Running supervised")
                 for s_epoch in range(args.subsample_passes):
                     for s_step, s_batch in enumerate(subsample_dataloader):
-                        #s_loss, _, _ = run_supervised(s_batch, docs, encoder, answer_model)
-                        s_loss, _, _ = run_model(
-                            batch, docs, encoder, answer_model, num_z=args.num_z_samples,
-                            supervised=True,
-                            true_z=True,
-                        )
+                        s_loss, _, _ = run_supervised(s_batch, docs, encoder, answer_model)
+                        #s_loss, _, _ = run_model(
+                        #    batch, docs, encoder, answer_model, num_z=args.num_z_samples,
+                        #    supervised=True,
+                        #    true_z=True,
+                        #)
                         s_loss.backward()
                         s_optim.step()
                         s_optim.zero_grad()
