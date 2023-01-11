@@ -26,6 +26,17 @@ with (data_dir / "guidelines.json").open("r") as f:
 with (data_dir / "ontology.json").open("r") as f:
     ontology = json.load(f)
 
+# annotations file. load up here and just write to it on save
+datafile = data_dir / "step_annotations.json"
+all_labels = None
+if datafile.exists():
+    print("Loading datafile")
+    with datafile.open("r") as f:
+        all_labels = json.load(f)
+else:
+    all_labels = {"dev": {}, "test": {}}
+
+
 guidelines, subflow_map = convert_manual(ontology, manual, False)
 
 split = st.selectbox("Data split", ["dev", "test"])
@@ -34,7 +45,7 @@ example_idx = st.number_input("Example number", min_value=0, max_value=len(conve
 example = conversations[example_idx]
 
 # viz example
-id = example["convo_id"]
+id = str(example["convo_id"])
 dialogue = example["original"]
 flow = example["scenario"]["flow"]
 subflow = example["scenario"]["subflow"]
@@ -42,22 +53,35 @@ document_sents = guidelines[subflow_map[subflow]]
 
 st.write(f"# Conversation id: {id}")
 
-st.write("Check if already in DB here")
-
-with st.form("alignment"):
+if id in all_labels[split]:
+    st.write("## Alignments already processed")
     st.write("## Dialogue")
+    for t, ((speaker, turn), step) in enumerate(zip(dialogue, all_labels[split][id])):
+        st.write(f"(turn {t}, step {step}) {speaker}: {turn}")
+    if st.button("Reset alignments?"):
+        del all_labels[split][id]
+        with datafile.open("w") as f:
+            json.dump(all_labels, f)
 
-    turn_alignments = []
-    for t, (speaker, turn) in enumerate(dialogue):
-        st.write(f"(turn {t}) {speaker}: {turn}")
-        z = st.radio(f"Document step for turn {t}", options=range(len(document_sents)), horizontal=True)
-        turn_alignments.append(z)
+else:
+    with st.form("alignment"):
+        st.write("## Dialogue")
 
-    submitted = st.form_submit_button("Submit alignment")
-    if submitted:
-        st.write("Submitted! Save to DB here")
-        st.write("Saved alignments")
-        st.write(turn_alignments)
+        turn_alignments = []
+        for t, (speaker, turn) in enumerate(dialogue):
+            st.write(f"(turn {t}) {speaker}: {turn}")
+            z = st.radio(f"Document step for turn {t}", options=range(len(document_sents)), horizontal=True)
+            turn_alignments.append(z)
+
+        submitted = st.form_submit_button("Submit alignment")
+        if submitted:
+            st.write("Submitted! Save to DB here")
+            st.write("Saved alignments")
+            st.write(turn_alignments)
+
+            all_labels[split][id] = turn_alignments
+            with datafile.open("w") as f:
+                json.dump(all_labels, f)
 
 
 with st.sidebar:
