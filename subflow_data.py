@@ -128,9 +128,9 @@ def get_abcd_dataset(
                     idx_action = idx
                     break
             dialogue = dialogue[:idx_action]
-        dialogue = " ".join(dialogue)
+        flat_dialogue = " ".join(dialogue)
 
-        xs.append(dialogue)
+        xs.append(flat_dialogue)
         doc_labels.append(subflow_map[subflow])
         doc_negatives.append([subflow_map[neg] for neg in negatives[subflow]])
 
