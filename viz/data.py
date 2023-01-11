@@ -86,5 +86,6 @@ else:
 
 with st.sidebar:
     st.write("## Document steps")
+    st.write(f"### Subflow {subflow} ({flow})")
     for i, sent in enumerate(document_sents):
         st.write(f"{i}: {sent}")
