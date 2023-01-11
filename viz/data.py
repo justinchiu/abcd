@@ -42,18 +42,23 @@ document_sents = guidelines[subflow_map[subflow]]
 
 st.write(f"# Conversation id: {id}")
 
-st.write("## Dialogue")
+st.write("Check if already in DB here")
 
-turn_alignments = []
-for t, (speaker, turn) in enumerate(dialogue):
-    st.write(f"{speaker}: {turn}")
-    z = st.radio(f"Document step for turn {t}", options=range(len(document_sents)), horizontal=True)
-    turn_alignments.append(z)
-st.write(turn_alignments)
+with st.form("alignment"):
+    st.write("## Dialogue")
 
-def submit_alignments():
-    st.write("Submitted!")
-st.button("Submit alignment", on_click=submit_alignments)
+    turn_alignments = []
+    for t, (speaker, turn) in enumerate(dialogue):
+        st.write(f"{speaker}: {turn}")
+        z = st.radio(f"Document step for turn {t}", options=range(len(document_sents)), horizontal=True)
+        turn_alignments.append(z)
+
+    submitted = st.form_submit_button("Submit alignment")
+    if submitted:
+        st.write("Submitted! Save to DB here")
+        st.write("Saved alignments")
+        st.write(turn_alignments)
+
 
 with st.sidebar:
     st.write("## Document steps")
