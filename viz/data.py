@@ -49,7 +49,7 @@ with st.form("alignment"):
 
     turn_alignments = []
     for t, (speaker, turn) in enumerate(dialogue):
-        st.write(f"{speaker}: {turn}")
+        st.write(f"(turn {t}) {speaker}: {turn}")
         z = st.radio(f"Document step for turn {t}", options=range(len(document_sents)), horizontal=True)
         turn_alignments.append(z)
 
