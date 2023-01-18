@@ -31,6 +31,7 @@ labels = all_labels["dev"]
 
 accuracy = evaluate.load("accuracy")
 recall = evaluate.load("accuracy")
+random_accuracy = evaluate.load("accuracy")
 for e in val_dataset:
     xs = e["xs"]
     str_id = str(e["ids"])
@@ -53,12 +54,17 @@ for e in val_dataset:
         turn_label = labels[str_id][i]
         accuracy.add(reference=turn_label, prediction=scores.argmax())
         recall.add(reference=True, prediction=(topk == turn_label).any())
+        random_accuracy.add(reference=turn_label, prediction=random.choice(range(len(doc_sents[idx]))))
 
 print(
-    "Validation document selection accuracy:",
+    "Validation step selection lexical accuracy:",
     accuracy.compute()["accuracy"],
 )
 print(
-    f"Validation document selection recall@{K}:",
+    "Validation step selection random accuracy:",
+    random_accuracy.compute()["accuracy"],
+)
+print(
+    f"Validation step selection recall@{K}:",
     recall.compute()["accuracy"],
 )
