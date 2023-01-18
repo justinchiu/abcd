@@ -9,7 +9,8 @@
 #SBATCH --get-user-env                       # retrieve the users login environment
 #SBATCH --mem=32000                          # server memory requested (per node)
 #SBATCH -t 24:00:00                           # Time limit (hh:mm:ss)
-#SBATCH --nodelist=rush-compute-02 # Request partition
+##SBATCH --nodelist=rush-compute-02 # Request partition
+#SBATCH --nodelist=rush-compute-01 # Request partition
 #SBATCH --partition=rush # Request partition
 #SBATCH --gres=gpu:1                  # Type/number of GPUs needed
 ##SBATCH --partition=gpu,rush # Request partition

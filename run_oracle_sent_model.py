@@ -12,6 +12,8 @@ import wandb
 import sys
 
 import pdb
+from pathlib import Path
+import json
 
 from datasets import load_metric
 from torch.utils.data.sampler import BatchSampler, RandomSampler
@@ -96,12 +98,14 @@ def run_model(batch, docs, doc_sents, doc_num_sents, model):
     conversation_logprob = turn_logprobs.masked_fill(~turn_mask.to(device), 0).sum(-1)
     neg_log_py = -conversation_logprob.mean()
 
-    #import pdb; pdb.set_trace()
-
-    return neg_log_py, tok_loss
+    return neg_log_py, tok_loss, loss_out
 
 
 def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, split):
+    with Path("data/step_annotations.json").open("r") as f:
+        all_labels = json.load(f)
+    labels = all_labels["dev"] if split == "Valid" else all_labels["test"]
+
     y_nll = 0
     num_examples = 0
     acc_metric = load_metric("accuracy")
@@ -111,51 +115,36 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
         sent_golds = []
 
     num_docs = docs.input_ids.shape[0]
-    # for step, batch in enumerate(dataloader):
-    for step, batch in track(enumerate(dataloader), total=len(dataloader)):
+    for step, batch in enumerate(dataloader):
+    #for step, batch in track(enumerate(dataloader), total=len(dataloader)):
         bsz = batch["x_ids"].shape[0]
         num_z = num_docs
 
-        loss, log_py_z = run_model(batch, docs, doc_sents, doc_num_sents, model)
+        loss, log_py_z, log_pturn_z = run_model(batch, docs, doc_sents, doc_num_sents, model)
 
         y_nll += loss * bsz
         num_examples += bsz
 
-        # log_py_z: bsz x num_z x time
-        cum_log_py_z = log_py_z.cumsum(-1)
-        z_hat = cum_log_py_z.argmax(1)
-
-        # index into start of agent turns
-        agent_mask = batch["agent_turn_mask"]
-        agent_z_hat = z_hat[agent_mask]
-
-        action_mask = batch["action_turn_mask"]
-        first_action_mask = action_mask.cumsum(1).cumsum(1) == 1
-        # take the prediction at last token if no action seen
-        first_action_mask[action_mask.sum(1) == 0, -1] = True
-        action_z_hat = z_hat[first_action_mask]
-
-        num_agent_turns = agent_mask.sum(-1).tolist()
-        doc_labels = []
-        for label, num in zip(batch["doc_labels"].tolist(), num_agent_turns):
-            doc_labels += [label] * num
-
-        acc_metric.add_batch(
-            predictions=agent_z_hat,
-            references=doc_labels,
-        )
-        first_action_acc_metric.add_batch(
-            predictions=action_z_hat,
-            references=batch["doc_labels"],
-        )
-
-        if not args.no_save_results and split == "Valid":
-            doc_preds.append(log_py_z.cpu())
-            doc_golds.append(batch["doc_labels"].cpu())
+        ids = batch["ids"].tolist()
+        batch_z_labels = []
+        batch_z_hat = []
+        for i, id in enumerate(ids):
+            id_str = str(id)
+            if id_str in labels:
+                z_labels = labels[id_str]
+                num_turns = len(z_labels)
+                logp = log_pturn_z[i,:,1:1+num_turns]
+                z_hat = logp.argmax(0).tolist()
+                acc_metric.add_batch(
+                    predictions=z_hat,
+                    references=z_labels,
+                )
+                if not args.no_save_results and split == "Valid":
+                    sent_preds.append(z_hat)
+                    sent_golds.append(z_labels)
 
     avg_loss = y_nll.item() / num_examples
     z_acc = acc_metric.compute()
-    z_first_action_acc = first_action_acc_metric.compute()
 
     if not args.nolog:
         wandb.log(
@@ -163,14 +152,13 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
                 "step": steps,
                 f"{split} Answer NLL": avg_loss,
                 f"{split} Subflow Acc": z_acc,
-                f"{split} Subflow First action Acc": z_first_action_acc,
             }
         )
     if not args.no_save_results and split == "Valid":
         torch.save(
             (
-                doc_preds,
-                doc_golds,
+                sent_preds,
+                sent_golds,
             ),
             f"logging/{args.run_name}|step-{steps}.pt",
         )
@@ -179,8 +167,6 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
     print(avg_loss)
     print("z acc")
     print(z_acc)
-    print("z first action acc")
-    print(z_first_action_acc)
 
     return avg_loss
 
@@ -296,7 +282,7 @@ def main():
                             f"{args.output_model_dir}/{run_name}-answer"
                         )
                 answer_model.train()
-            loss, _ = run_model(batch, docs, doc_sents, doc_num_sents, answer_model)
+            loss, _, _ = run_model(batch, docs, doc_sents, doc_num_sents, answer_model)
             loss.backward()
             if (
                 step % args.gradient_accumulation_steps == 0
