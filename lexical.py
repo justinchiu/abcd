@@ -17,7 +17,7 @@ K = 16
 
 # lexical accuracy is better with lowercase
 # this is the best setting for doing full-document
-val_dataset, processed_docs, subflow_map = get_abcd_dataset(
+val_dataset, processed_docs, doc_sents, subflow_map = get_abcd_dataset(
     "dev", 0, 0, lower=True, truncate_early=False
 )
 """
