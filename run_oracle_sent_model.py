@@ -131,16 +131,18 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
         for i, id in enumerate(ids):
             id_str = str(id)
             if id_str in labels:
-                z_labels = labels[id_str]
+                z_labels = torch.tensor(labels[id_str])
                 num_turns = len(z_labels)
                 logp = log_pturn_z[i,:,1:1+num_turns]
-                z_hat = logp.argmax(0).tolist()
+                z_hat = logp.argmax(0)
+
+                agent_turn_mask = batch["is_agent_turn"][i,:num_turns]
                 acc_metric.add_batch(
-                    predictions=z_hat,
-                    references=z_labels,
+                    predictions=z_hat[agent_turn_mask],
+                    references=z_labels[agent_turn_mask],
                 )
                 if not args.no_save_results and split == "Valid":
-                    sent_preds.append(z_hat)
+                    sent_preds.append(logp.cpu())
                     sent_golds.append(z_labels)
 
     avg_loss = y_nll.item() / num_examples

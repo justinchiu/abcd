@@ -43,18 +43,26 @@ for e in val_dataset:
     if str_id not in labels:
         continue
 
-    texts = xs.split("agent")
-    for i in range(len(texts)):
-        tokenized_query = " ".join(texts[:i+1]).split()[:max_length]
-        #tokenized_query = texts[i].split()[:max_length]
-        scores = bm25.get_scores(tokenized_query)
+    speakers, turns = list(zip(*e["turns"]))
+    for i in range(len(turns)):
+        if speakers[i] == "agent":
+            # POSTERIOR
+            turn_idx = i+1
+            # PRIOR
+            # turn_idx = i
+            tokenized_query = " ".join(
+                f"{s}: {t}"
+                for s, t in zip(speakers[:turn_idx], turns[:turn_idx])
+            ).split()[-max_length:]
+            # TODO
+            scores = bm25.get_scores(tokenized_query)
 
-        topk = (-scores).argsort()[:K]
+            topk = (-scores).argsort()[:K]
 
-        turn_label = labels[str_id][i]
-        accuracy.add(reference=turn_label, prediction=scores.argmax())
-        recall.add(reference=True, prediction=(topk == turn_label).any())
-        random_accuracy.add(reference=turn_label, prediction=random.choice(range(len(doc_sents[idx]))))
+            turn_label = labels[str_id][i]
+            accuracy.add(reference=turn_label, prediction=scores.argmax())
+            recall.add(reference=True, prediction=(topk == turn_label).any())
+            random_accuracy.add(reference=turn_label, prediction=random.choice(range(len(doc_sents[idx]))))
 
 print(
     "Validation step selection lexical accuracy:",

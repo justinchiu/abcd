@@ -104,6 +104,7 @@ def get_abcd_dataset(
     docs = [" ".join(sents) for sents in doc_sents]
 
     xs, doc_labels, doc_negatives = [], [], []
+    turns = []
     ids, flows, subflows = [], [], []
     for conversation in raw_data[split]:
         id = conversation["convo_id"]
@@ -138,6 +139,7 @@ def get_abcd_dataset(
         ids.append(id)
         flows.append(flow)
         subflows.append(subflow)
+        turns.append([(speaker, maybe_lower(turn, lower)) for speaker, turn in conversation["original"]])
 
     dataset = Dataset.from_dict(
         dict(
@@ -147,6 +149,7 @@ def get_abcd_dataset(
             ids=ids,
             flows=flows,
             subflows=subflows,
+            turns=turns,
         )
     )
     return dataset, docs, doc_sents, subflow_map
@@ -245,6 +248,30 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
         action_turn = (x_ids == action_id) & is_next_token_colon
         turn_locations = customer_turn | agent_turn | action_turn
 
+        speakers = [
+            [speaker for speaker, turn in conv]
+            for conv in example_batch["turns"]
+        ]
+        is_agent_turn = [
+            [speaker == "agent" for speaker, turn in conv]
+            for conv in example_batch["turns"]
+        ]
+
+        #max_turns = max([len(x) for x in is_agent_turn])
+        max_turns = 128
+        # CONSTANT
+
+        def pad(xs, length, val):
+            if len(xs) < length:
+                return xs + [val] * (length - len(xs))
+            else:
+                return xs
+
+        padded_is_agent_turn = [
+            pad([speaker == "agent" for speaker, turn in conv], max_turns, False)
+            for conv in example_batch["turns"]
+        ]
+
         doc_labels = example_batch["doc_labels"]
         doc_negatives = example_batch["doc_negatives"]
 
@@ -271,6 +298,7 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
             "agent_turn_mask": agent_turn,
             "customer_turn_mask": customer_turn,
             "action_turn_mask": action_turn,
+            "is_agent_turn": padded_is_agent_turn,
         }
         return encodings
 
@@ -285,6 +313,7 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
             "agent_turn_mask",
             "customer_turn_mask",
             "action_turn_mask",
+            "is_agent_turn",
         ]
         dataset.set_format(type="torch", columns=columns, output_all_columns=False)
         return dataset

@@ -39,7 +39,7 @@ def star_all_ws_analyze():
     all_pred = all_pz.argmax(-1)
     ws_pred = ws_pz.argmax(-1)
 
-    valid_dataset, docs, subflow_map = get_abcd_dataset(
+    valid_dataset, docs, doc_sents, subflow_map = get_abcd_dataset(
         "dev",
         0,
         0,
@@ -77,4 +77,12 @@ def star_all_ws_analyze():
         print(ws_qz[idx].topk(5))
         pdb.set_trace()
 
-star_all_ws_analyze()
+def oracle_sent_analyze():
+    path = "logging/oracle-sent-model-118-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 |step-1000.pt"
+
+    pred, label = torch.load(path)
+    import pdb; pdb.set_trace()
+
+if __name__ == "__main__":
+    #star_all_ws_analyze()
+    oracle_sent_analyze()
