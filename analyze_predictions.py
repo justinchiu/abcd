@@ -78,10 +78,13 @@ def star_all_ws_analyze():
         pdb.set_trace()
 
 def oracle_sent_analyze():
-    path = "logging/oracle-sent-model-118-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 |step-1000.pt"
-
-    pred, label = torch.load(path)
-    import pdb; pdb.set_trace()
+    path = "logging/oracle-sent-model-118-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 |step-5000.pt"
+    preds, labels = torch.load(path)
+    for i, (pred, label) in enumerate(zip(preds, labels)):
+        print(i)
+        print(label)
+        print(pred.argmax(0))
+        import pdb; pdb.set_trace()
 
 if __name__ == "__main__":
     #star_all_ws_analyze()

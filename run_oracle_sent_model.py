@@ -87,9 +87,18 @@ def run_model(batch, docs, doc_sents, doc_num_sents, model):
     turn_numbers = turn_mask.cumsum(-1)
 
     loss_buffer = torch.zeros_like(tok_loss)
-    loss_out = torch.scatter_add(loss_buffer, -1, turn_numbers.to(device), tok_loss)
+    log_p_turn_given_z = torch.scatter_add(loss_buffer, -1, turn_numbers.to(device), tok_loss)
 
-    turn_logprobs = loss_out.logsumexp(1)
+    # padding steps will only have <bos> <eos>, so mask will only have two elements.
+    padding_z = sent_mask[doc_labels].sum(-1) <= 2
+    log_p_z = torch.zeros(bsz, num_z, device=device)
+    #log_p_z[padding_z] = -1e5
+    log_p_z[padding_z] = float("-inf")
+    log_p_z = log_p_z.log_softmax(-1)
+
+    log_p_turn_z = log_p_turn_given_z + log_p_z[:,:,None]
+
+    turn_logprobs = log_p_turn_z.logsumexp(1)
 
     turn_mask = torch.arange(x_len) <= turn_numbers[:,0,-1,None]
 
@@ -98,7 +107,7 @@ def run_model(batch, docs, doc_sents, doc_num_sents, model):
     conversation_logprob = turn_logprobs.masked_fill(~turn_mask.to(device), 0).sum(-1)
     neg_log_py = -conversation_logprob.mean()
 
-    return neg_log_py, tok_loss, loss_out
+    return neg_log_py, tok_loss, log_p_turn_z
 
 
 def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, split):
@@ -115,8 +124,8 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
         sent_golds = []
 
     num_docs = docs.input_ids.shape[0]
-    for step, batch in enumerate(dataloader):
-    #for step, batch in track(enumerate(dataloader), total=len(dataloader)):
+    #for step, batch in enumerate(dataloader):
+    for step, batch in track(enumerate(dataloader), total=len(dataloader)):
         bsz = batch["x_ids"].shape[0]
         num_z = num_docs
 
