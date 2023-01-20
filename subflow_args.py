@@ -15,6 +15,8 @@ def get_args():
     parser.add_argument("--no_save_model", action="store_true")
     parser.add_argument("--no_save_results", action="store_true")
 
+    parser.add_argument("--init_from_previous", action="store_true")
+
     parser.add_argument("--num_dialogue_turns", default=0, type=int)
     parser.add_argument("--num_doc_sents", default=0, type=int)
 

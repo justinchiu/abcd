@@ -122,6 +122,7 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
     if not args.no_save_results and split == "Valid":
         sent_preds = []
         sent_golds = []
+        sent_ids = []
 
     num_docs = docs.input_ids.shape[0]
     #for step, batch in enumerate(dataloader):
@@ -153,6 +154,7 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
                 if not args.no_save_results and split == "Valid":
                     sent_preds.append(logp.cpu())
                     sent_golds.append(z_labels)
+                    sent_ids.append(id)
 
     avg_loss = y_nll.item() / num_examples
     z_acc = acc_metric.compute()
@@ -162,7 +164,7 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
             {
                 "step": steps,
                 f"{split} Answer NLL": avg_loss,
-                f"{split} Subflow Acc": z_acc,
+                f"{split} Step Acc": z_acc,
             }
         )
     if not args.no_save_results and split == "Valid":
@@ -170,6 +172,7 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
             (
                 sent_preds,
                 sent_golds,
+                sent_ids,
             ),
             f"logging/{args.run_name}|step-{steps}.pt",
         )
@@ -198,12 +201,15 @@ def main():
         f"sk-{args.subsample_k} "
         f"ss-{args.subsample_steps} "
         f"sp-{args.subsample_passes} "
+        f"ip-{args.init_from_previous}"
     )
     args.run_name = run_name
 
     # answer_model_dir = args.answer_model_dir if not load_answer else load_answer
     #answer_model = AutoModelForSeq2SeqLM.from_pretrained(args.answer_model_dir)
-    answer_model_dir = "saved_models/ws-encoder-answer-model-14-s-roberta-base-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 k-16 tz-False s-subflow sk-3 ss-250 sp-4 -answer"
+    answer_model_dir = args.answer_model_dir
+    if args.init_from_previous:
+        answer_model_dir = "saved_models/ws-encoder-answer-model-14-s-roberta-base-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 k-16 tz-False s-subflow sk-3 ss-250 sp-4 -answer"
     answer_model = AutoModelForSeq2SeqLM.from_pretrained(answer_model_dir)
     answer_model = answer_model.to(device)
 
