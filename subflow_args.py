@@ -67,6 +67,18 @@ def get_args():
         type=int,
         help="number of passes through supervised examples each time. 0 means unsupervised.",
     )
+    parser.add_argument(
+        "--subsample_obj",
+        default="joint",
+        choices=["joint", "conditional"],
+        help="supervised objective",
+    )
+    parser.add_argument(
+        "--subsample_gradient_accumulation_steps",
+        type=int,
+        default=1,
+        help="Number of updates steps to accumulate before performing a backward/update pass.",
+    )
     # / subsample
 
     parser.add_argument(

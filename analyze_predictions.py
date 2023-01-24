@@ -81,8 +81,9 @@ def oracle_sent_analyze():
     path = "logging/oracle-sent-model-119-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 |step-750.pt"
     #path = "logging/oracle-sent-model-119-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-512 s-subflow sk-0 ss-250 sp-0 |step-500.pt"
     preds, labels, ids = torch.load(path)
-    for i, (pred, label, id) in enumerate(zip(preds, labels)):
+    for i, (pred, label, id) in enumerate(zip(preds, labels, ids)):
         print(i)
+        print(id)
         print(label)
         print(pred.argmax(0))
         import pdb; pdb.set_trace()

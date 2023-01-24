@@ -296,6 +296,7 @@ def main():
         f"sk-{args.subsample_k} "
         f"ss-{args.subsample_steps} "
         f"sp-{args.subsample_passes} "
+        f"so-{args.subsample_obj} "
     )
     args.run_name = run_name
     print(run_name)
@@ -378,21 +379,27 @@ def main():
                 print("Running supervised")
                 for s_epoch in range(args.subsample_passes):
                     for s_step, s_batch in enumerate(subsample_dataloader):
-                        s_loss, _, _ = run_supervised(s_batch, docs, encoder, answer_model)
-                        #s_loss, _, _ = run_model(
-                        #    batch, docs, encoder, answer_model, num_z=args.num_z_samples,
-                        #    supervised=True,
-                        #    true_z=True,
-                        #)
+                        if args.subsample_obj == "joint":
+                            s_loss, _, _ = run_supervised(s_batch, docs, encoder, answer_model)
+                        elif args.subsample_obj == "conditional":
+                            s_loss, _, _ = run_model(
+                                batch, docs, encoder, answer_model, num_z=args.num_z_samples,
+                                supervised=True,
+                                true_z=True,
+                            )
                         s_loss.backward()
-                        s_optim.step()
-                        s_optim.zero_grad()
-                        s_completed_steps += 1
-                        if not args.nolog:
-                            wandb.log({
-                                "supervised step": s_completed_steps,
-                                "supervised train Loss": s_loss.item()
-                            })
+                        if (
+                            s_step % args.subsample_gradient_accumulation_steps == 0
+                            or s_step == len(subsample_dataloader) - 1
+                        ):
+                            s_optim.step()
+                            s_optim.zero_grad()
+                            s_completed_steps += 1
+                            if not args.nolog:
+                                wandb.log({
+                                    "supervised step": s_completed_steps,
+                                    "supervised train Loss": s_loss.item()
+                                })
                     s_lr_scheduler.step()
             # / subsample
              
