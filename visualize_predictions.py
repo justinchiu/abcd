@@ -38,6 +38,15 @@ if datafile.exists():
 else:
     all_labels = {"dev": {}, "test": {}}
 
+agent_datafile = data_dir / "agent_step_annotations.json"
+agent_labels = None
+if datafile.exists():
+    print("Loading datafile")
+    with agent_datafile.open("r") as f:
+        agent_labels = json.load(f)
+else:
+    agent_labels = {"dev": {}, "test": {}}
+
 path = "logging/oracle-sent-model-119-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 |step-5000.pt"
 #path = "logging/oracle-sent-model-119-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-512 s-subflow sk-0 ss-250 sp-0 |step-5000.pt"
 preds, labels, ids = torch.load(path)
@@ -63,13 +72,17 @@ st.write(f"# Conversation id: {id}")
 print(preds[example_num].argmax(0))
 print(labels[example_num])
 
-if id in all_labels[split]:
+if id in all_labels[split] and id in agent_labels[split]:
     st.write("## Dialogue")
-    for t, ((speaker, turn), step) in enumerate(zip(dialogue, all_labels[split][id])):
-        st.write(f"(turn {t}, step {step}, pred {preds[example_num][:,t].argmax(0)}) {speaker}: {turn}")
+    for t, ((speaker, turn), step, agent_step) in enumerate(zip(dialogue, all_labels[split][id], agent_labels[split][id])):
+        blackstring = f"(turn {t}, step {step}, astep {agent_step}, pred {preds[example_num][:,t].argmax(0)}) {speaker}: {turn}"
+        colorstring = f"<p style='color:Blue'>(turn {t}, step {step}, astep {agent_step}, pred {preds[example_num][:,t].argmax(0)}) {speaker}: {turn}</p>"
+        string = blackstring if agent_step == -1 else colorstring
+        st.markdown(string, unsafe_allow_html=True)
 
 else:
     st.write("Unannotated and therefore no labels")
+    st.write("May not be annotated in all or agent labels")
 
 with st.sidebar:
     st.write("## Document steps")
