@@ -1,5 +1,6 @@
 #!/bin/bash
-#SBATCH -J sent256                       # Job name
+#SBATCH -J ws-semisup                       # Job name
+##SBATCH -J sent256                       # Job name
 ##SBATCH -J sent512                       # Job name
 #SBATCH -o slurm/sent_%j.out          # output file (%j expands to jobID)
 #SBATCH -e slurm/sent_%j.err          # error log file (%j expands to jobID)
@@ -10,7 +11,7 @@
 #SBATCH --get-user-env                       # retrieve the users login environment
 #SBATCH --mem=32000                          # server memory requested (per node)
 #SBATCH -t 24:00:00                           # Time limit (hh:mm:ss)
-##SBATCH --nodelist=rush-compute-02 # Request partition
+#SBATCH --nodelist=rush-compute-02 # Request partition
 ##SBATCH --nodelist=rush-compute-01 # Request partition
 #SBATCH --partition=rush,gpu # Request partition
 ##SBATCH --gres=gpu:1                  # Type/number of GPUs needed
@@ -22,8 +23,11 @@ source /home/jtc257/.bashrc
 source /home/jtc257/scripts/env.sh
 py113env
 
+python run_ws_answer_model.py --num_z_samples 16 --batch_size 2 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 125 --gradient_accumulation_steps 8 --subsample subflow --subsample_k 15 --subsample_steps 250 --subsample_passes 4 --subsampled_batch_size 16
+
+# oracle sent
 # no init from previous
-python run_oracle_sent_model.py --batch_size 8 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 119 --gradient_accumulation_steps 2
+#python run_oracle_sent_model.py --batch_size 8 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 119 --gradient_accumulation_steps 2
 #python run_oracle_sent_model.py --batch_size 2 --eval_batch_size 4 --max_length 512 --eval_steps 250 --epoch 10 --prefix 119 --gradient_accumulation_steps 8
 
 # init from previous
