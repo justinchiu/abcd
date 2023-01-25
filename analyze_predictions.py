@@ -82,6 +82,7 @@ def star_all_ws_analyze():
 def oracle_sent_analyze():
     path = "logging/oracle-sent-model-119-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 |step-5000.pt"
     #path = "logging/oracle-sent-model-119-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-512 s-subflow sk-0 ss-250 sp-0 |step-5000.pt"
+    #path = "logging/oracle-sent-model-119-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-512 s-subflow sk-0 ss-250 sp-0 ip-False|step-5000.pt"
     preds, labels, ids = torch.load(path)
 
     # data

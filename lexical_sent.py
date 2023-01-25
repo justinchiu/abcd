@@ -67,14 +67,17 @@ for e in val_dataset:
             topk = (-scores).argsort()[:K]
 
             turn_label = labels[str_id][i]
-            accuracy.add(reference=turn_label, prediction=scores.argmax())
-            recall.add(reference=True, prediction=(topk == turn_label).any())
-            random_accuracy.add(reference=turn_label, prediction=random.choice(range(len(doc_sents[idx]))))
+            #accuracy.add(reference=turn_label, prediction=scores.argmax())
+            #recall.add(reference=True, prediction=(topk == turn_label).any())
+            #random_accuracy.add(reference=turn_label, prediction=random.choice(range(len(doc_sents[idx]))))
 
             if str_id in agent_labels:
                 agent_turn_label = agent_labels[str_id][i]
                 if agent_turn_label != -1:
                     agent_accuracy.add(reference=agent_turn_label, prediction=scores.argmax())
+                    accuracy.add(reference=turn_label, prediction=scores.argmax())
+                    recall.add(reference=True, prediction=(topk == turn_label).any())
+                    random_accuracy.add(reference=turn_label, prediction=random.choice(range(len(doc_sents[idx]))))
 
 print(
     "Validation agent step selection lexical accuracy:",
