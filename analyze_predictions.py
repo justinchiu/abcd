@@ -1,5 +1,7 @@
 import torch
 import pdb
+from pathlib import Path
+import json
 
 from subflow_data import get_abcd_dataset
 
@@ -81,12 +83,62 @@ def oracle_sent_analyze():
     path = "logging/oracle-sent-model-119-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 |step-5000.pt"
     #path = "logging/oracle-sent-model-119-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-512 s-subflow sk-0 ss-250 sp-0 |step-5000.pt"
     preds, labels, ids = torch.load(path)
+
+    # data
+    split = "dev"
+    data_dir = Path("data")
+    with (data_dir / "abcd_v1.2.json").open("r") as f:
+        raw_data = json.load(f)
+    with (data_dir / "guidelines.json").open("r") as f:
+        manual = json.load(f)
+    with (data_dir / "ontology.json").open("r") as f:
+        ontology = json.load(f)
+
+    conversations = raw_data[split]
+
+    # annotations files
+    datafile = data_dir / "step_annotations.json"
+    all_labels = None
+    if datafile.exists():
+        print("Loading datafile")
+        with datafile.open("r") as f:
+            all_labels = json.load(f)
+    else:
+        all_labels = {"dev": {}, "test": {}}
+
+    agent_datafile = data_dir / "agent_step_annotations.json"
+    agent_labels = None
+    if datafile.exists():
+        print("Loading datafile")
+        with agent_datafile.open("r") as f:
+            agent_labels = json.load(f)
+    else:
+        agent_labels = {"dev": {}, "test": {}}
+
+    correct = 0
+    total = 0
     for i, (pred, label, id) in enumerate(zip(preds, labels, ids)):
         print(i)
         print(id)
         print(label)
-        print(pred.argmax(0))
-        import pdb; pdb.set_trace()
+        if str(id) not in agent_labels["dev"]:
+            continue
+
+        example = [x for x in conversations if x["convo_id"] == id][0]
+        dialogue = example["original"]
+
+        this_pred = pred.argmax(0)
+        alabel = agent_labels["dev"][str(id)]
+        print(this_pred)
+        print(alabel)
+        for x,y,(speaker, utt) in zip(this_pred.tolist(), alabel, dialogue):
+            if y != -1 and speaker == "agent":
+                total += 1
+                if x == y:
+                    correct += 1
+    print(f"correct: {correct}")
+    print(f"total: {total}")
+    import pdb; pdb.set_trace()
 
 if __name__ == "__main__":
     #star_all_ws_analyze()

@@ -28,8 +28,12 @@ bm25s = [
 with Path("data/step_annotations.json").open("r") as f:
     all_labels = json.load(f)
 labels = all_labels["dev"]
+with Path("data/agent_step_annotations.json").open("r") as f:
+    agent_all_labels = json.load(f)
+agent_labels = agent_all_labels["dev"]
 
 accuracy = evaluate.load("accuracy")
+agent_accuracy = evaluate.load("accuracy")
 recall = evaluate.load("accuracy")
 random_accuracy = evaluate.load("accuracy")
 for e in val_dataset:
@@ -50,10 +54,13 @@ for e in val_dataset:
             turn_idx = i+1
             # PRIOR
             # turn_idx = i
+            # prefix, (29%)
             tokenized_query = " ".join(
                 f"{s}: {t}"
                 for s, t in zip(speakers[:turn_idx], turns[:turn_idx])
             ).split()[-max_length:]
+            # only current turn, does worse (16%)
+            #tokenized_query = f"{speakers[i]}: {turns[i]}"
             # TODO
             scores = bm25.get_scores(tokenized_query)
 
@@ -64,6 +71,15 @@ for e in val_dataset:
             recall.add(reference=True, prediction=(topk == turn_label).any())
             random_accuracy.add(reference=turn_label, prediction=random.choice(range(len(doc_sents[idx]))))
 
+            if str_id in agent_labels:
+                agent_turn_label = agent_labels[str_id][i]
+                if agent_turn_label != -1:
+                    agent_accuracy.add(reference=agent_turn_label, prediction=scores.argmax())
+
+print(
+    "Validation agent step selection lexical accuracy:",
+    agent_accuracy.compute()["accuracy"],
+)
 print(
     "Validation step selection lexical accuracy:",
     accuracy.compute()["accuracy"],
