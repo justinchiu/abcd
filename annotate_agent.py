@@ -1,9 +1,9 @@
+# label steps for each agent turn only.
+ 
 import json
 import numpy as np
 import random
 from pathlib import Path
-
-import torch
 
 import streamlit as st
 
@@ -29,7 +29,8 @@ with (data_dir / "ontology.json").open("r") as f:
     ontology = json.load(f)
 
 # annotations file. load up here and just write to it on save
-datafile = data_dir / "step_annotations.json"
+datafile = data_dir / "agent_step_annotations.json"
+# different from step_annotations.json!
 all_labels = None
 if datafile.exists():
     print("Loading datafile")
@@ -38,18 +39,13 @@ if datafile.exists():
 else:
     all_labels = {"dev": {}, "test": {}}
 
-path = "logging/oracle-sent-model-119-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 |step-5000.pt"
-#path = "logging/oracle-sent-model-119-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-512 s-subflow sk-0 ss-250 sp-0 |step-5000.pt"
-preds, labels, ids = torch.load(path)
 
 guidelines, subflow_map = convert_manual(ontology, manual, False)
 
-example_num = st.number_input("Example number", min_value=0, max_value=len(ids), value=0)
-
-split = "dev"
-id = ids[example_num]
+split = st.selectbox("Data split", ["dev", "test"])
 conversations = raw_data[split]
-example = [x for x in conversations if x["convo_id"] == id][0]
+example_idx = st.number_input("Example number", min_value=0, max_value=len(conversations), value=0)
+example = conversations[example_idx]
 
 # viz example
 id = str(example["convo_id"])
@@ -60,16 +56,36 @@ document_sents = guidelines[subflow_map[subflow]]
 
 st.write(f"# Conversation id: {id}")
 
-print(preds[example_num].argmax(0))
-print(labels[example_num])
-
 if id in all_labels[split]:
+    st.write("## Alignments already processed")
     st.write("## Dialogue")
     for t, ((speaker, turn), step) in enumerate(zip(dialogue, all_labels[split][id])):
-        st.write(f"(turn {t}, step {step}, pred {preds[example_num][:,t].argmax(0)}) {speaker}: {turn}")
+        st.write(f"(turn {t}, step {step}) {speaker}: {turn}")
+    if st.button("Reset alignments?"):
+        del all_labels[split][id]
+        with datafile.open("w") as f:
+            json.dump(all_labels, f)
 
 else:
-    st.write("Unannotated and therefore no labels")
+    with st.form("alignment"):
+        st.write("## Dialogue")
+
+        turn_alignments = []
+        for t, (speaker, turn) in enumerate(dialogue):
+            st.write(f"(turn {t}) {speaker}: {turn}")
+            z = st.radio(f"Document step for turn {t}", options=range(-1,len(document_sents)), horizontal=True)
+            turn_alignments.append(z)
+
+        submitted = st.form_submit_button("Submit alignment")
+        if submitted:
+            st.write("Submitted! Save to DB here")
+            st.write("Saved alignments")
+            st.write(turn_alignments)
+
+            all_labels[split][id] = turn_alignments
+            with datafile.open("w") as f:
+                json.dump(all_labels, f)
+
 
 with st.sidebar:
     st.write("## Document steps")
