@@ -77,7 +77,7 @@ if id in all_labels[split] and id in agent_labels[split]:
     for t, ((speaker, turn), step, agent_step) in enumerate(zip(dialogue, all_labels[split][id], agent_labels[split][id])):
         blackstring = f"(turn {t}, step {step}, astep {agent_step}, pred {preds[example_num][:,t].argmax(0)}) {speaker}: {turn}"
         colorstring = f"<p style='color:Blue'>(turn {t}, step {step}, astep {agent_step}, pred {preds[example_num][:,t].argmax(0)}) {speaker}: {turn}</p>"
-        string = blackstring if agent_step == -1 and speaker != "agent" else colorstring
+        string = blackstring if agent_step == -1 or speaker != "agent" else colorstring
         st.markdown(string, unsafe_allow_html=True)
 
 else:
