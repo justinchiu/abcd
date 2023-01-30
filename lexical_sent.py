@@ -36,6 +36,10 @@ accuracy = evaluate.load("accuracy")
 agent_accuracy = evaluate.load("accuracy")
 recall = evaluate.load("accuracy")
 random_accuracy = evaluate.load("accuracy")
+
+binary_accuracy = evaluate.load("accuracy")
+agent_binary_accuracy = evaluate.load("accuracy")
+
 for e in val_dataset:
     xs = e["xs"]
     str_id = str(e["ids"])
@@ -44,10 +48,33 @@ for e in val_dataset:
     idx = subflow_map[subflow]
     bm25 = bm25s[idx]
 
-    if str_id not in labels:
+    #if str_id not in labels:
+    if str_id not in labels or str_id not in agent_labels:
         continue
 
     speakers, turns = list(zip(*e["turns"]))
+
+    # check lexical accuracy of align/not
+    alabels = agent_labels[str_id]
+    doc_steps = doc_sents[idx]
+    scores = [
+        bm25.get_scores(turn.split())
+        for turn in turns
+    ]
+    preds = [sy.max() > 1 for sy in scores]
+
+    binary_accuracy.add_batch(
+        references=np.array(alabels) != -1,
+        predictions=preds,
+    )
+    for speaker, alabel, pred in zip(speakers, alabels, preds):
+        if speaker == "agent":
+            agent_binary_accuracy.add(
+                reference=alabel != -1,
+                prediction=pred,
+            )
+
+    # compute accuracy at agent turns
     for i in range(len(turns)):
         if speakers[i] == "agent":
             # POSTERIOR
@@ -94,4 +121,13 @@ print(
 print(
     f"Validation step selection recall@{K}:",
     recall.compute()["accuracy"],
+)
+
+print(
+    f"Validation binary accuracy:",
+    binary_accuracy.compute()["accuracy"],
+)
+print(
+    f"Validation agent binary accuracy:",
+    agent_binary_accuracy.compute()["accuracy"],
 )

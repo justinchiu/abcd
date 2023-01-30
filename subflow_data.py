@@ -340,7 +340,7 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
         subsampled_list = [
             train_dataset[i]
             for idxs in map_idxs.values()
-            for i in random.sample(idxs, k)
+            for i in random.sample(idxs, min(k, len(idxs)))
         ]
         subsampled_dataset = process_dataset(Dataset.from_list(subsampled_list))
         subsampled_dataloader = DataLoader(
