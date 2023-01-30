@@ -25,6 +25,18 @@ bm25s = [
     for sents in doc_sents
 ]
 
+# sentence_transformers
+from sentence_transformers import SentenceTransformer
+sentences = ["This is an example sentence", "Each sentence is converted"]
+
+model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
+#embeddings = model.encode(sentences)
+docsent_embs = [
+    model.encode(sents)
+    for sents in doc_sents
+]
+# /sentence_transformers
+
 with Path("data/step_annotations.json").open("r") as f:
     all_labels = json.load(f)
 labels = all_labels["dev"]
@@ -39,6 +51,9 @@ random_accuracy = evaluate.load("accuracy")
 
 binary_accuracy = evaluate.load("accuracy")
 agent_binary_accuracy = evaluate.load("accuracy")
+
+sbert_binary_accuracy = evaluate.load("accuracy")
+sbert_agent_binary_accuracy = evaluate.load("accuracy")
 
 for e in val_dataset:
     xs = e["xs"]
@@ -73,6 +88,24 @@ for e in val_dataset:
                 reference=alabel != -1,
                 prediction=pred,
             )
+
+    # SBERT
+    sent_embs = docsent_embs[idx]
+    turn_embs = model.encode(turns)
+    turn2sent_scores = np.einsum("sh,th->ts", sent_embs, turn_embs)
+    sbert_preds = (turn2sent_scores > 0.25).any(-1)
+
+    sbert_binary_accuracy.add_batch(
+        references=np.array(alabels) != -1,
+        predictions=sbert_preds,
+    )
+    for speaker, alabel, pred in zip(speakers, alabels, sbert_preds):
+        if speaker == "agent":
+            sbert_agent_binary_accuracy.add(
+                reference=alabel != -1,
+                prediction=pred,
+            )
+    # /SBERT
 
     # compute accuracy at agent turns
     for i in range(len(turns)):
@@ -124,10 +157,19 @@ print(
 )
 
 print(
-    f"Validation binary accuracy:",
+    f"Validation lexical binary accuracy:",
     binary_accuracy.compute()["accuracy"],
 )
 print(
-    f"Validation agent binary accuracy:",
+    f"Validation lexical agent binary accuracy:",
     agent_binary_accuracy.compute()["accuracy"],
+)
+
+print(
+    f"Validation sbert binary accuracy:",
+    sbert_binary_accuracy.compute()["accuracy"],
+)
+print(
+    f"Validation sbert agent binary accuracy:",
+    sbert_agent_binary_accuracy.compute()["accuracy"],
 )
