@@ -3,6 +3,7 @@ from collections import defaultdict, Counter
 import json
 from pathlib import Path
 import random
+import numpy as np
 
 import pdb
 
@@ -215,6 +216,7 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
     ).to(device)
 
     def convert_to_features(example_batch):
+        bsz = len(example_batch["xs"])
         tokenized_x = tokenizer(
             example_batch["xs"],
             return_tensors="pt",
@@ -248,6 +250,33 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
         action_turn = (x_ids == action_id) & is_next_token_colon
         turn_locations = customer_turn | agent_turn | action_turn
 
+        max_turns = args.max_turns
+        def pad(xs, length, val):
+            if len(xs) < length:
+                return xs + [val] * (length - len(xs))
+            else:
+                return xs
+
+        tokenized_turns = tokenizer(
+            [
+                f"{x[0]}: {x[1]}"
+                for xs in example_batch["turns"]
+                for x in pad(xs, max_turns, ("", ""))
+            ],
+            return_tensors="pt",
+            padding="max_length",
+            truncation=True,
+            max_length=args.max_turn_length,
+        )
+        turn_ids = tokenized_turns.input_ids.view(bsz, max_turns, args.max_turn_length)
+        turn_mask = tokenized_turns.attention_mask.view(bsz, max_turns, args.max_turn_length)
+        turn_lengths = [len(turns) for turns in example_batch["turns"]]
+        print(f"max turn toks: {turn_mask.sum(-1).max()}")
+        import pdb; pdb.set_trace()
+        print(f"mean turn toks: {turn_mask.sum(-1).float().mean()}")
+        print(f"max num turns: {max(turn_lengths)}")
+        print(f"mean num turns: {np.mean(turn_lengths)}")
+
         speakers = [
             [speaker for speaker, turn in conv]
             for conv in example_batch["turns"]
@@ -256,16 +285,6 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
             [speaker == "agent" for speaker, turn in conv]
             for conv in example_batch["turns"]
         ]
-
-        #max_turns = max([len(x) for x in is_agent_turn])
-        max_turns = 128
-        # CONSTANT
-
-        def pad(xs, length, val):
-            if len(xs) < length:
-                return xs + [val] * (length - len(xs))
-            else:
-                return xs
 
         padded_is_agent_turn = [
             pad([speaker == "agent" for speaker, turn in conv], max_turns, False)
@@ -299,6 +318,9 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
             "customer_turn_mask": customer_turn,
             "action_turn_mask": action_turn,
             "is_agent_turn": padded_is_agent_turn,
+            "turn_ids": turn_ids,
+            "turn_mask": turn_mask,
+            "turn_lengths": turn_lengths,
         }
         return encodings
 
@@ -314,6 +336,9 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
             "customer_turn_mask",
             "action_turn_mask",
             "is_agent_turn",
+            "turn_ids",
+            "turn_mask",
+            "turn_lengths",
         ]
         dataset.set_format(type="torch", columns=columns, output_all_columns=False)
         return dataset

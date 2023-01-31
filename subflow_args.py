@@ -23,6 +23,8 @@ def get_args():
     parser.add_argument("--num_negatives", default=0, type=int, help="only for oracle Z* experiments")
 
     parser.add_argument("--max_length", default=512, type=int)
+    parser.add_argument("--max_turn_length", default=64, type=int)
+    parser.add_argument("--max_turns", default=64, type=int)
 
     parser.add_argument(
         "--truncate_early",

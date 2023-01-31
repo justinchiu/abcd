@@ -35,8 +35,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 seed = 555
 set_seed(seed)
 
-#torch.autograd.set_detect_anomaly(True)
-
 start_customer_token = "custom"
 customer_token = "Ġcustomer"
 start_agent_token = "agent"
@@ -63,37 +61,46 @@ def run_model(batch, docs, doc_sents, doc_num_sents, model):
 
     num_z = sent_ids.shape[1]
 
-    # bsz x num_z x x_len
-
-    labels = (
-        x_ids[:, None].repeat(1, num_z, 1).view(bsz * num_z, x_len)
-    )
+    blank_input = torch.tensor([0,2], dtype=torch.long, device=device)
+    labels = x_ids
 
     out = model(
-        input_ids=sent_ids[doc_labels].view(bsz * num_z, z_len),
-        attention_mask=sent_mask[doc_labels].view(bsz * num_z, z_len),
+        input_ids=blank_input.expand(bsz, 2),
         labels=labels,
     )
     logits = out.logits.log_softmax(-1)
     N, T, V = logits.shape
-    tok_loss = logits[torch.arange(N)[:, None], torch.arange(T), labels].view(
-        bsz, num_z, T
-    )
-    #tok_loss[~x_mask.bool()[:, None].expand(bsz, num_z, T)] = 0
-    tok_loss = tok_loss.masked_fill(~x_mask.bool()[:, None].expand(bsz, num_z, T), 0)
+    tok_loss = logits[torch.arange(N)[:, None], torch.arange(T), labels]
+    tok_loss = tok_loss.masked_fill(~x_mask.bool(), 0)
 
     turn_mask = batch["agent_turn_mask"] | batch["customer_turn_mask"] | batch["action_turn_mask"]
-    turn_mask = turn_mask[:,None,:].repeat(1, num_z, 1)
     turn_numbers = turn_mask.cumsum(-1)
 
     loss_buffer = torch.zeros_like(tok_loss)
-    log_p_turn_given_z = torch.scatter_add(loss_buffer, -1, turn_numbers.to(device), tok_loss)
+    log_p_turn_given_past = torch.scatter_add(loss_buffer, -1, turn_numbers.to(device), tok_loss)
+
+    # need p(turn | step) for all turns and steps.
+    step_ids = sent_ids[doc_labels]
+    step_mask = sent_ids[doc_labels]
+    turn_ids = batch["turn_ids"].to(device)
+    turn_mask = batch["turn_mask"].to(device)
+
+    # bsz x num_turns x num_z x time
+    num_turns = turn_ids.shape[1]
+    s_len = turn_ids.shape[-1]
+    turn_out = model(
+        input_ids=step_ids[:,None,:,:].repeat(1, num_turns, 1, 1).view(-1, s_len),
+        attention_mask=step_mask[:,None,:,:].repeat(1, num_turns, 1, 1).view(-1, s_len),
+        labels=turn_ids[:,:,None,:].repeat(1,1,num_z,1).view(-1, x_len),
+    )
+    import pdb; pdb.set_trace()
 
     # padding steps will only have <bos> <eos>, so mask will only have two elements.
     padding_z = sent_mask[doc_labels].sum(-1) <= 2
     log_p_z = torch.zeros(bsz, num_z, device=device)
     #log_p_z[padding_z] = -1e5
-    log_p_z[padding_z] = float("-inf")
+    #log_p_z[padding_z] = float("-inf")
+    log_p_z = log_p_z.masked_fill(padding_z, float("-inf"))
     log_p_z = log_p_z.log_softmax(-1)
 
     log_p_turn_z = log_p_turn_given_z + log_p_z[:,:,None]
@@ -113,16 +120,23 @@ def run_model(batch, docs, doc_sents, doc_num_sents, model):
 def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, split):
     with Path("data/step_annotations.json").open("r") as f:
         all_labels = json.load(f)
+    with Path("data/agent_step_annotations.json").open("r") as f:
+        agent_all_labels = json.load(f)
     labels = all_labels["dev"] if split == "Valid" else all_labels["test"]
+    agent_labels = agent_all_labels["dev"] if split == "Valid" else agent_all_labels["test"]
 
     y_nll = 0
     num_examples = 0
     acc_metric = load_metric("accuracy")
+    agent_acc_metric = load_metric("accuracy")
 
     if not args.no_save_results and split == "Valid":
         sent_preds = []
         sent_golds = []
         sent_ids = []
+        agent_sent_preds = []
+        agent_sent_golds = []
+        agent_sent_ids = []
 
     num_docs = docs.input_ids.shape[0]
     #for step, batch in enumerate(dataloader):
@@ -156,8 +170,25 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
                     sent_golds.append(z_labels)
                     sent_ids.append(id)
 
+            if id_str in agent_labels:
+                z_labels = torch.tensor(agent_labels[id_str])
+                num_turns = len(z_labels)
+                logp = log_pturn_z[i,:,1:1+num_turns]
+                z_hat = logp.argmax(0)
+
+                agent_turn_mask = z_labels != -1
+                acc_metric.add_batch(
+                    predictions=z_hat[agent_turn_mask],
+                    references=z_labels[agent_turn_mask],
+                )
+                if not args.no_save_results and split == "Valid":
+                    agent_sent_preds.append(logp.cpu())
+                    agent_sent_golds.append(z_labels)
+                    agent_sent_ids.append(id)
+
     avg_loss = y_nll.item() / num_examples
     z_acc = acc_metric.compute()
+    agent_z_acc = agent_acc_metric.compute()
 
     if not args.nolog:
         wandb.log(
@@ -176,11 +207,21 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
             ),
             f"logging/{args.run_name}|step-{steps}.pt",
         )
+        torch.save(
+            (
+                agent_sent_preds,
+                agent_sent_golds,
+                agent_sent_ids,
+            ),
+            f"logging/{args.run_name}|step-{steps}.agent.pt",
+        )
 
     print("average loss")
     print(avg_loss)
     print("z acc")
     print(z_acc)
+    print("agent z acc")
+    print(agent_z_acc)
 
     return avg_loss
 
