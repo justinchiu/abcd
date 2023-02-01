@@ -87,11 +87,13 @@ def run_model(batch, docs, doc_sents, doc_num_sents, model):
 
     # bsz x num_turns x num_z x time
     num_turns = turn_ids.shape[1]
-    s_len = turn_ids.shape[-1]
+    turn_len = turn_ids.shape[-1]
+    s_len = step_ids.shape[-1]
+    import pdb; pdb.set_trace()
     turn_out = model(
         input_ids=step_ids[:,None,:,:].repeat(1, num_turns, 1, 1).view(-1, s_len),
         attention_mask=step_mask[:,None,:,:].repeat(1, num_turns, 1, 1).view(-1, s_len),
-        labels=turn_ids[:,:,None,:].repeat(1,1,num_z,1).view(-1, x_len),
+        labels=turn_ids[:,:,None,:].repeat(1,1,num_z,1).view(-1, turn_len),
     )
     import pdb; pdb.set_trace()
 

@@ -59,8 +59,10 @@ for e in train_dataset:
     num_turns.append(len(speakers))
     num_agent_turns.append(len([x for x in speakers if x == "agent"]))
 
-hists = [agent_lens, turn_lens, num_turns, num_agent_turns]
-names = ["agent_lens", "turn_lens", "num_turns", "num_agent_turns"]
+step_lens = [len(tokenizer.tokenize(sent)) for sents in doc_sents for sent in sents]
+
+hists = [agent_lens, turn_lens, num_turns, num_agent_turns, step_lens]
+names = ["agent_lens", "turn_lens", "num_turns", "num_agent_turns", "step_lens"]
 
 print(f"{np.min(agent_lens)} {np.mean(agent_lens)} {np.max(agent_lens)}")
 print(f"{np.min(turn_lens)} {np.mean(turn_lens)} {np.max(turn_lens)}")
