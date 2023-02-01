@@ -33,7 +33,9 @@ py113env
 #python run_ws_answer_model.py --num_z_samples 16 --batch_size 2 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 124 --gradient_accumulation_steps 8 --subsample subflow --subsample_k 20 --subsample_steps 250 --subsample_passes 4 --subsampled_batch_size 2 --subsample_gradient_accumulation_steps 8 --subsample_obj conditional
 
 # large sample conditional
-python run_ws_answer_model.py --num_z_samples 16 --batch_size 2 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 124 --gradient_accumulation_steps 8 --subsample subflow --subsample_k 200 --subsample_steps 250 --subsample_passes 2 --subsampled_batch_size 2 --subsample_gradient_accumulation_steps 8 --subsample_obj conditional
+#python run_ws_answer_model.py --num_z_samples 16 --batch_size 2 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 124 --gradient_accumulation_steps 8 --subsample subflow --subsample_k 200 --subsample_steps 250 --subsample_passes 2 --subsampled_batch_size 2 --subsample_gradient_accumulation_steps 8 --subsample_obj conditional
+# large sample joint
+python run_ws_answer_model.py --num_z_samples 16 --batch_size 2 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 124 --gradient_accumulation_steps 8 --subsample subflow --subsample_k 200 --subsample_steps 250 --subsample_passes 2 --subsampled_batch_size 16 --subsample_gradient_accumulation_steps 1 --subsample_obj joint
 
 # oracle sent
 # no init from previous

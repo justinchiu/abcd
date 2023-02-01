@@ -272,7 +272,6 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
         turn_mask = tokenized_turns.attention_mask.view(bsz, max_turns, args.max_turn_length)
         turn_lengths = [len(turns) for turns in example_batch["turns"]]
         print(f"max turn toks: {turn_mask.sum(-1).max()}")
-        import pdb; pdb.set_trace()
         print(f"mean turn toks: {turn_mask.sum(-1).float().mean()}")
         print(f"max num turns: {max(turn_lengths)}")
         print(f"mean num turns: {np.mean(turn_lengths)}")
