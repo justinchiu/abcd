@@ -255,7 +255,7 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
             if len(xs) < length:
                 return xs + [val] * (length - len(xs))
             else:
-                return xs
+                return xs[:length]
 
         tokenized_turns = tokenizer(
             [
