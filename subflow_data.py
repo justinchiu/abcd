@@ -212,7 +212,7 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
         return_tensors="pt",
         padding="max_length",
         truncation=True,
-        max_length=args.max_length,
+        max_length=args.max_step_length,
     ).to(device)
 
     def convert_to_features(example_batch):

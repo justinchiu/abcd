@@ -73,43 +73,65 @@ def run_model(batch, docs, doc_sents, doc_num_sents, model):
     tok_loss = logits[torch.arange(N)[:, None], torch.arange(T), labels]
     tok_loss = tok_loss.masked_fill(~x_mask.bool(), 0)
 
-    turn_mask = batch["agent_turn_mask"] | batch["customer_turn_mask"] | batch["action_turn_mask"]
-    turn_numbers = turn_mask.cumsum(-1)
+    is_turn_mask = batch["agent_turn_mask"] | batch["customer_turn_mask"] | batch["action_turn_mask"]
+    turn_numbers = is_turn_mask.cumsum(-1) - 1
+    turn_numbers[:,0] = 0
+    # input        = <s> agent:
+    # turn_numbers = 0   1 ...
+    # the <s> = 0 is a waste of a turn number, so fold it into first turn
 
+    num_turns = batch["turn_ids"].shape[1]
     loss_buffer = torch.zeros_like(tok_loss)
+    #loss_buffer = torch.zeros((bsz, num_turns+1), device=device)
     log_p_turn_given_past = torch.scatter_add(loss_buffer, -1, turn_numbers.to(device), tok_loss)
 
     # need p(turn | step) for all turns and steps.
     step_ids = sent_ids[doc_labels]
     step_mask = sent_ids[doc_labels]
     turn_ids = batch["turn_ids"].to(device)
-    turn_mask = batch["turn_mask"].to(device)
+    turn_mask = batch["turn_mask"].to(device).bool()
 
     # bsz x num_turns x num_z x time
-    num_turns = turn_ids.shape[1]
     turn_len = turn_ids.shape[-1]
     s_len = step_ids.shape[-1]
-    import pdb; pdb.set_trace()
+    expanded_turn_ids = turn_ids[:,:,None,:].repeat(1,1,num_z,1)
     turn_out = model(
         input_ids=step_ids[:,None,:,:].repeat(1, num_turns, 1, 1).view(-1, s_len),
         attention_mask=step_mask[:,None,:,:].repeat(1, num_turns, 1, 1).view(-1, s_len),
-        labels=turn_ids[:,:,None,:].repeat(1,1,num_z,1).view(-1, turn_len),
+        labels=expanded_turn_ids.view(-1, turn_len),
     )
-    import pdb; pdb.set_trace()
+    V = turn_out.logits.shape[-1]
+    logits_toks_given_step = turn_out.logits.view(bsz, num_turns, num_z, turn_len, V).log_softmax(-1)
+    log_p_toks_given_step = logits_toks_given_step.gather(-1, expanded_turn_ids.unsqueeze(-1)).squeeze(-1)
+    log_p_turn_given_step = log_p_toks_given_step.masked_fill(
+        ~turn_mask[:,:,None,:].expand(bsz, num_turns, num_z, turn_len),
+        0,
+    ).sum(-1)
+
+    log_p_turn_given_z = torch.cat([
+        log_p_turn_given_step,
+        log_p_turn_given_past[:,:num_turns,None],
+    ], -1)
 
     # padding steps will only have <bos> <eos>, so mask will only have two elements.
     padding_z = sent_mask[doc_labels].sum(-1) <= 2
-    log_p_z = torch.zeros(bsz, num_z, device=device)
+    # we have the last element as p(turn | past), so we want to add that to the prior
+    padding_z = torch.cat([
+        padding_z,
+        torch.zeros(bsz, 1, device=device, dtype=bool),
+    ], 1)
+    log_p_z = torch.zeros(bsz, num_z+1, device=device)
     #log_p_z[padding_z] = -1e5
     #log_p_z[padding_z] = float("-inf")
     log_p_z = log_p_z.masked_fill(padding_z, float("-inf"))
     log_p_z = log_p_z.log_softmax(-1)
 
-    log_p_turn_z = log_p_turn_given_z + log_p_z[:,:,None]
+    log_p_turn_z = log_p_turn_given_z + log_p_z[:,None,:]
 
-    turn_logprobs = log_p_turn_z.logsumexp(1)
+    turn_logprobs = log_p_turn_z.logsumexp(-1)
 
-    turn_mask = torch.arange(x_len) <= turn_numbers[:,0,-1,None]
+    #turn_mask = torch.arange(x_len) <= turn_numbers[:,0,-1,None]
+    turn_mask = torch.arange(num_turns) <= batch["turn_lengths"][:,None]
 
     #turn_logprobs[~turn_mask.to(device)] = 0
     #conversation_logprob = turn_logprobs.sum(-1)
@@ -131,6 +153,7 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
     num_examples = 0
     acc_metric = load_metric("accuracy")
     agent_acc_metric = load_metric("accuracy")
+    agent_filter_acc_metric = load_metric("accuracy")
 
     if not args.no_save_results and split == "Valid":
         sent_preds = []
@@ -139,10 +162,11 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
         agent_sent_preds = []
         agent_sent_golds = []
         agent_sent_ids = []
+        agent_sent_filter = []
 
     num_docs = docs.input_ids.shape[0]
-    #for step, batch in enumerate(dataloader):
-    for step, batch in track(enumerate(dataloader), total=len(dataloader)):
+    for step, batch in enumerate(dataloader):
+    #for step, batch in track(enumerate(dataloader), total=len(dataloader)):
         bsz = batch["x_ids"].shape[0]
         num_z = num_docs
 
@@ -151,16 +175,20 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
         y_nll += loss * bsz
         num_examples += bsz
 
+        max_turns = batch["turn_ids"].shape[1]
         ids = batch["ids"].tolist()
         batch_z_labels = []
         batch_z_hat = []
         for i, id in enumerate(ids):
             id_str = str(id)
+
+            # check against labels with contiguous annotations
             if id_str in labels:
                 z_labels = torch.tensor(labels[id_str])
-                num_turns = len(z_labels)
-                logp = log_pturn_z[i,:,1:1+num_turns]
-                z_hat = logp.argmax(0)
+                num_turns = min(len(z_labels), max_turns)
+                logp = log_pturn_z[i,:num_turns,:-1]
+                z_hat = logp.argmax(-1)
+                z_labels = z_labels[:num_turns]
 
                 agent_turn_mask = batch["is_agent_turn"][i,:num_turns]
                 acc_metric.add_batch(
@@ -172,32 +200,51 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
                     sent_golds.append(z_labels)
                     sent_ids.append(id)
 
+            # check against labels with sparse annotations
+            # but only the turns that are on
             if id_str in agent_labels:
                 z_labels = torch.tensor(agent_labels[id_str])
-                num_turns = len(z_labels)
-                logp = log_pturn_z[i,:,1:1+num_turns]
-                z_hat = logp.argmax(0)
+                num_turns = min(len(z_labels), max_turns)
+                logp = log_pturn_z[i,:num_turns,:-1]
+                z_hat = logp.argmax(-1)
+                z_labels = z_labels[:num_turns]
 
+                # prediction for on-turns
                 agent_turn_mask = z_labels != -1
-                acc_metric.add_batch(
+                agent_acc_metric.add_batch(
                     predictions=z_hat[agent_turn_mask],
                     references=z_labels[agent_turn_mask],
                 )
+
+                # filtering predictions
+                flogp = log_pturn_z[i,:num_turns]
+                f_hat = flogp.argmax(-1) != -1
+                ison = z_labels != -1
+                agent_filter_acc_metric.add_batch(
+                    predictions=f_hat,
+                    references=ison,
+                )
+
                 if not args.no_save_results and split == "Valid":
                     agent_sent_preds.append(logp.cpu())
                     agent_sent_golds.append(z_labels)
                     agent_sent_ids.append(id)
+                    agent_sent_filter.append(f_hat)
+
 
     avg_loss = y_nll.item() / num_examples
     z_acc = acc_metric.compute()
     agent_z_acc = agent_acc_metric.compute()
+    agent_f_acc = agent_filter_acc_metric.compute()
 
     if not args.nolog:
         wandb.log(
             {
                 "step": steps,
                 f"{split} Answer NLL": avg_loss,
-                f"{split} Step Acc": z_acc,
+                f"{split} All Step Acc": z_acc,
+                f"{split} Step Acc": agent_z_acc,
+                f"{split} Filter Acc": agent_f_acc,
             }
         )
     if not args.no_save_results and split == "Valid":
@@ -214,6 +261,7 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
                 agent_sent_preds,
                 agent_sent_golds,
                 agent_sent_ids,
+                agent_sent_filter,
             ),
             f"logging/{args.run_name}|step-{steps}.agent.pt",
         )
@@ -224,6 +272,8 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
     print(z_acc)
     print("agent z acc")
     print(agent_z_acc)
+    print("agent filter acc")
+    print(agent_f_acc)
 
     return avg_loss
 
@@ -244,7 +294,10 @@ def main():
         f"sk-{args.subsample_k} "
         f"ss-{args.subsample_steps} "
         f"sp-{args.subsample_passes} "
-        f"ip-{args.init_from_previous}"
+        f"ip-{args.init_from_previous} "
+        f"mt-{args.max_turns} "
+        f"mtl-{args.max_turn_length} "
+        f"msl-{args.max_step_length} "
     )
     args.run_name = run_name
 
