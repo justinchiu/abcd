@@ -35,7 +35,7 @@ py113env
 # large sample conditional
 #python run_ws_answer_model.py --num_z_samples 16 --batch_size 2 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 124 --gradient_accumulation_steps 8 --subsample subflow --subsample_k 200 --subsample_steps 250 --subsample_passes 2 --subsampled_batch_size 2 --subsample_gradient_accumulation_steps 8 --subsample_obj conditional
 # large sample joint
-python run_ws_answer_model.py --num_z_samples 16 --batch_size 2 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 124 --gradient_accumulation_steps 8 --subsample subflow --subsample_k 200 --subsample_steps 250 --subsample_passes 2 --subsampled_batch_size 16 --subsample_gradient_accumulation_steps 1 --subsample_obj joint
+#python run_ws_answer_model.py --num_z_samples 16 --batch_size 2 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 124 --gradient_accumulation_steps 8 --subsample subflow --subsample_k 200 --subsample_steps 250 --subsample_passes 2 --subsampled_batch_size 16 --subsample_gradient_accumulation_steps 1 --subsample_obj joint
 
 # oracle sent
 # no init from previous
@@ -46,3 +46,7 @@ python run_ws_answer_model.py --num_z_samples 16 --batch_size 2 --eval_batch_siz
 #python run_oracle_sent_model.py --batch_size 8 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 119 --gradient_accumulation_steps 2 --init_from_previous
 #python run_oracle_sent_model.py --batch_size 2 --eval_batch_size 4 --max_length 512 --eval_steps 250 --epoch 10 --prefix 119 --gradient_accumulation_steps 8 --init_from_previous
 
+# oracle sent with info tradeoff
+python run_oracle_sent_info_model.py --batch_size 2 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 21 --gradient_accumulation_steps 8 --max_turns 24 --max_turn_length 16
+# longer turns
+#python run_oracle_sent_info_model.py --batch_size 1 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 21 --gradient_accumulation_steps 16 --max_turns 32 --max_turn_length 32

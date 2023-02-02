@@ -141,6 +141,14 @@ def oracle_sent_analyze():
     print(f"total: {total}")
     import pdb; pdb.set_trace()
 
+def oracle_sent_info_analyze():
+    path = "logging/oracle-sent-model-21-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 ip-False mt-32 mtl-32 msl-128 |step-750.agent.pt"
+    preds, labels, ids, fpreds = torch.load(path, map_location=torch.device("cpu"))
+
+    import pdb; pdb.set_trace()
+
+
 if __name__ == "__main__":
     #star_all_ws_analyze()
-    oracle_sent_analyze()
+    #oracle_sent_analyze()
+    oracle_sent_info_analyze()

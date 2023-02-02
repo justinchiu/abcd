@@ -218,7 +218,7 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
 
                 # filtering predictions
                 flogp = log_pturn_z[i,:num_turns]
-                f_hat = flogp.argmax(-1) != -1
+                f_hat = flogp.argmax(-1) != (flogp.shape[-1]-1)
                 ison = z_labels != -1
                 agent_filter_acc_metric.add_batch(
                     predictions=f_hat,
@@ -229,7 +229,7 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
                     agent_sent_preds.append(logp.cpu())
                     agent_sent_golds.append(z_labels)
                     agent_sent_ids.append(id)
-                    agent_sent_filter.append(f_hat)
+                    agent_sent_filter.append(flogp.cpu())
 
 
     avg_loss = y_nll.item() / num_examples
@@ -284,7 +284,7 @@ def main():
 
     model_name = args.answer_model_dir.split("/")[-1]
     run_name = (
-        f"oracle-sent-model-{args.prefix}-{model_name} "
+        f"oracle-sent-info-model-{args.prefix}-{model_name} "
         f"lr-{args.learning_rate} "
         f"bs-{args.batch_size*args.gradient_accumulation_steps} "
         f"dt-{args.num_dialogue_turns} "
