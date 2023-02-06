@@ -57,5 +57,7 @@ py113env
 #python run_oracle_sent_model.py --batch_size 8 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 26 --gradient_accumulation_steps 2 --init_from_previous --dummy_step
 #python run_oracle_sent_model.py --batch_size 2 --eval_batch_size 4 --max_length 512 --eval_steps 250 --epoch 10 --prefix 26 --gradient_accumulation_steps 8 --init_from_previous --dummy_step
 # oracle sent dummy align
-python run_oracle_sent_model.py --batch_size 4 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 26 --gradient_accumulation_steps 4 --dummy_step
+#python run_oracle_sent_model.py --batch_size 4 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 26 --gradient_accumulation_steps 4 --dummy_step
 #python run_oracle_sent_model.py --batch_size 2 --eval_batch_size 4 --max_length 512 --eval_steps 250 --epoch 10 --prefix 26 --gradient_accumulation_steps 8 --dummy_step
+# oracle sent init from previous rerun
+python run_oracle_sent_model.py --batch_size 2 --eval_batch_size 4 --max_length 512 --eval_steps 250 --epoch 10 --prefix 26 --gradient_accumulation_steps 8 --init_from_previous
