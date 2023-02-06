@@ -273,8 +273,8 @@ def main():
         f"sk-{args.subsample_k} "
         f"ss-{args.subsample_steps} "
         f"sp-{args.subsample_passes} "
-        f"ip-{args.init_from_previous}"
-        f"ds-{args.dummy_step}"
+        f"ip-{args.init_from_previous} "
+        f"ds-{args.dummy_step} "
     )
     args.run_name = run_name
 
