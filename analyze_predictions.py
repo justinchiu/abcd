@@ -142,8 +142,11 @@ def oracle_sent_analyze():
     import pdb; pdb.set_trace()
 
 def oracle_sent_info_analyze():
-    path = "logging/oracle-sent-model-21-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 ip-False mt-32 mtl-32 msl-128 |step-750.agent.pt"
+    path = "logging/oracle-sent-info-model-21-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 ip-True mt-24 mtl-16 msl-128 |step-500.agent.pt"
     preds, labels, ids, fpreds = torch.load(path, map_location=torch.device("cpu"))
+
+    fhats = torch.cat([fpred.argmax(-1) for fpred in fpreds])
+    print(fhats.bincount())
 
     import pdb; pdb.set_trace()
 

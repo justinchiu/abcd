@@ -1,5 +1,6 @@
 #!/bin/bash
-#SBATCH -J ws-semisup                       # Job name
+##SBATCH -J ws-semisup                       # Job name
+#SBATCH -J oracle-sent-info                       # Job name
 ##SBATCH -J sent256                       # Job name
 ##SBATCH -J sent512                       # Job name
 #SBATCH -o slurm/sent_%j.out          # output file (%j expands to jobID)
@@ -47,6 +48,8 @@ py113env
 #python run_oracle_sent_model.py --batch_size 2 --eval_batch_size 4 --max_length 512 --eval_steps 250 --epoch 10 --prefix 119 --gradient_accumulation_steps 8 --init_from_previous
 
 # oracle sent with info tradeoff
-python run_oracle_sent_info_model.py --batch_size 2 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 21 --gradient_accumulation_steps 8 --max_turns 24 --max_turn_length 16
+#python run_oracle_sent_info_model.py --batch_size 2 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 21 --gradient_accumulation_steps 8 --max_turns 24 --max_turn_length 16
+# with init-from-previous
+python run_oracle_sent_info_model.py --batch_size 2 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 21 --gradient_accumulation_steps 8 --max_turns 24 --max_turn_length 16 --init_from_previous
 # longer turns
 #python run_oracle_sent_info_model.py --batch_size 1 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 21 --gradient_accumulation_steps 16 --max_turns 32 --max_turn_length 32

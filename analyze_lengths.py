@@ -64,10 +64,10 @@ step_lens = [len(tokenizer.tokenize(sent)) for sents in doc_sents for sent in se
 hists = [agent_lens, turn_lens, num_turns, num_agent_turns, step_lens]
 names = ["agent_lens", "turn_lens", "num_turns", "num_agent_turns", "step_lens"]
 
-print(f"{np.min(agent_lens)} {np.mean(agent_lens)} {np.max(agent_lens)}")
-print(f"{np.min(turn_lens)} {np.mean(turn_lens)} {np.max(turn_lens)}")
-print(f"{np.min(num_agent_turns)} {np.mean(num_agent_turns)} {np.max(num_agent_turns)}")
-print(f"{np.min(num_turns)} {np.mean(num_turns)} {np.max(num_turns)}")
+print(f"agent len {np.min(agent_lens)} {np.mean(agent_lens)} {np.max(agent_lens)}")
+print(f"turn len {np.min(turn_lens)} {np.mean(turn_lens)} {np.max(turn_lens)}")
+print(f"num agent turns {np.min(num_agent_turns)} {np.mean(num_agent_turns)} {np.max(num_agent_turns)}")
+print(f"num turns {np.min(num_turns)} {np.mean(num_turns)} {np.max(num_turns)}")
 
 for name, data in zip(names, hists):
     sns.histplot(data)
