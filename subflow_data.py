@@ -204,7 +204,7 @@ def prepare_dataloader(tokenizer, args, device, subsample="subflow", k=1):
         return sents if L == length else sents + [""] * (length - L)
 
     doc_num_sents = [len(sents) for sents in doc_sents]
-    max_num_sents = max(doc_num_sents)
+    max_num_sents = max(doc_num_sents) + 1 if args.dummy_step else max(doc_num_sents)
     padded_doc_sents = [pad_sents(sents, max_num_sents) for sents in doc_sents]
 
     tokenized_doc_sents = tokenizer(

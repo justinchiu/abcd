@@ -2,8 +2,14 @@ import argparse
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--prefix", default="14", help="date")
+    parser.add_argument("--prefix", default="26", help="date")
+    parser.add_argument("--init_from_previous", action="store_true")
 
+    # model choice
+    parser.add_argument("--dummy_step", action="store_true",
+        help="allow alignment to dummy step, eg no conditioning on a step")
+
+    # objective stuff
     parser.add_argument("--interact_data", action="store_true")
     parser.add_argument("--eval_only", action="store_true")
 
@@ -11,12 +17,12 @@ def get_args():
     parser.add_argument("--kl_weight", default=1.0, type=float)
     parser.add_argument("--kl_no_detach_p", action="store_true")
 
+    # logging stuff
     parser.add_argument("--nolog", action="store_true")
     parser.add_argument("--no_save_model", action="store_true")
     parser.add_argument("--no_save_results", action="store_true")
 
-    parser.add_argument("--init_from_previous", action="store_true")
-
+    # data stuff
     parser.add_argument("--num_dialogue_turns", default=0, type=int)
     parser.add_argument("--num_doc_sents", default=0, type=int)
 
@@ -26,6 +32,7 @@ def get_args():
     parser.add_argument("--max_turn_length", default=32, type=int)
     parser.add_argument("--max_step_length", default=128, type=int)
     parser.add_argument("--max_turns", default=16, type=int)
+
 
     parser.add_argument(
         "--truncate_early",

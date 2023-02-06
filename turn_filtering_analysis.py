@@ -75,7 +75,8 @@ for e in val_dataset:
         for turn in turns
     ]
     #preds = [sy.max() > 1 for sy in scores]
-    preds = [sy.max() > 1.5 for sy in scores]
+    #preds = [sy.max() > 1.5 for sy in scores]
+    preds = [sy.max() > 1.4 for sy in scores]
 
     lexical_preds.append(preds)
     for speaker, alabel, pred in zip(speakers, alabels, preds):
@@ -88,7 +89,8 @@ for e in val_dataset:
     turn_embs = model.encode(turns)
     turn2sent_scores = np.einsum("sh,th->ts", sent_embs, turn_embs)
     #sbert_pred = (turn2sent_scores > 0.25).any(-1)
-    sbert_pred = (turn2sent_scores > 0.18).any(-1)
+    sbert_pred = (turn2sent_scores > 0.20).any(-1)
+    #sbert_pred = (turn2sent_scores > 0.19).any(-1)
 
     sbert_preds.append(sbert_pred)
     for speaker, alabel, pred in zip(speakers, alabels, sbert_pred):
@@ -118,17 +120,3 @@ print(f"num positive pred: {sbert_preds.sum()} / {len(sbert_preds)}")
 print("agent sbert")
 print(prfs(agent_true_labels, agent_sbert_preds))
 print(f"num positive pred: {agent_sbert_preds.sum()} / {len(agent_sbert_preds)}")
-
-"""
-# SBERT
-print(
-    f"Validation sbert binary accuracy:",
-    sbert_binary_accuracy.compute()["accuracy"],
-)
-print(
-    f"Validation sbert agent binary accuracy:",
-    sbert_agent_binary_accuracy.compute()["accuracy"],
-)
-# /SBERT
-"""
-
