@@ -108,6 +108,7 @@ for e in val_dataset:
     argmax_lexical_preds.append(argmax_preds)
     monotonic_lexical_preds.append(monotonic_preds)
     first_monotonic_lexical_preds.append(first_monotonic_preds)
+    first_argmax_lexical_preds.append(first_argmax_preds)
     for speaker, label, argmax_pred, monotonic_pred, first_monotonic_pred, first_argmax_pred in zip(
         speakers,
         labels,
