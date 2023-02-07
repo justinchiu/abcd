@@ -7,7 +7,7 @@ from rank_bm25 import BM25Okapi
 from sklearn.metrics import accuracy_score as accscore
 import torch
 
-from inference_utils import monotonic_prediction, first_prediction
+from inference_utils import monotonic_prediction, first_monotonic_prediction, first_argmax_prediction
 
 from subflow_data import get_abcd_dataset
 
@@ -49,24 +49,28 @@ agent_labels = agent_all_labels["dev"]
 # lexical
 argmax_lexical_preds = []
 monotonic_lexical_preds = []
-first_lexical_preds = []
+first_monotonic_lexical_preds = []
+first_argmax_lexical_preds = []
 
 agent_argmax_lexical_preds = []
 agent_monotonic_lexical_preds = []
-agent_first_lexical_preds = []
+agent_first_monotonic_lexical_preds = []
+agent_first_argmax_lexical_preds = []
 
 # sbert
 argmax_sbert_preds = []
 monotonic_sbert_preds = []
-first_sbert_preds = []
+first_monotonic_sbert_preds = []
+first_argmax_sbert_preds = []
 
 agent_argmax_sbert_preds = []
 agent_monotonic_sbert_preds = []
-agent_first_sbert_preds = []
+agent_first_monotonic_sbert_preds = []
+agent_first_argmax_sbert_preds = []
 
+# true
 true_labels = []
 agent_true_labels = []
-
 
 for e in val_dataset:
     xs = e["xs"]
@@ -98,22 +102,25 @@ for e in val_dataset:
 
     monotonic_preds = monotonic_prediction(unary)
     argmax_preds = [sy.argmax() for sy in scores]
-    first_preds = first_prediction(unary)
+    first_monotonic_preds = first_monotonic_prediction(unary)
+    first_argmax_preds = first_argmax_prediction(unary)
 
     argmax_lexical_preds.append(argmax_preds)
     monotonic_lexical_preds.append(monotonic_preds)
-    first_lexical_preds.append(first_preds)
-    for speaker, label, argmax_pred, monotonic_pred, first_pred in zip(
+    first_monotonic_lexical_preds.append(first_monotonic_preds)
+    for speaker, label, argmax_pred, monotonic_pred, first_monotonic_pred, first_argmax_pred in zip(
         speakers,
         labels,
         argmax_preds,
         monotonic_preds,
-        first_preds,
+        first_monotonic_preds,
+        first_argmax_preds,
     ):
         if speaker == "agent":
             agent_argmax_lexical_preds.append(argmax_pred)
             agent_monotonic_lexical_preds.append(monotonic_pred)
-            agent_first_lexical_preds.append(first_pred)
+            agent_first_monotonic_lexical_preds.append(first_monotonic_pred)
+            agent_first_argmax_lexical_preds.append(first_argmax_pred)
             agent_true_labels.append(label)
 
     # SBERT
@@ -122,42 +129,49 @@ for e in val_dataset:
     turn2sent_scores = np.einsum("sh,th->ts", sent_embs, turn_embs)
     argmax_preds = turn2sent_scores.argmax(-1)
     monotonic_preds = monotonic_prediction(torch.tensor(turn2sent_scores))
-    first_preds = first_prediction(torch.tensor(turn2sent_scores))
+    first_monotonic_preds = first_monotonic_prediction(torch.tensor(turn2sent_scores))
+    first_argmax_preds = first_argmax_prediction(torch.tensor(turn2sent_scores))
 
     argmax_sbert_preds.append(argmax_preds)
     monotonic_sbert_preds.append(monotonic_preds)
-    first_sbert_preds.append(first_preds)
-    for speaker, label, argmax_pred, monotonic_pred, first_pred in zip(
+    first_monotonic_sbert_preds.append(first_monotonic_preds)
+    first_argmax_sbert_preds.append(first_argmax_preds)
+    for speaker, label, argmax_pred, monotonic_pred, first_monotonic_pred, first_argmax_pred in zip(
         speakers,
         labels,
         argmax_preds,
         monotonic_preds,
-        first_preds,
+        first_monotonic_preds,
+        first_argmax_preds,
     ):
         if speaker == "agent":
             agent_argmax_sbert_preds.append(argmax_pred)
             agent_monotonic_sbert_preds.append(monotonic_pred)
-            agent_first_sbert_preds.append(first_pred)
+            agent_first_monotonic_sbert_preds.append(first_monotonic_pred)
+            agent_first_argmax_sbert_preds.append(first_argmax_pred)
     # /SBERT
 
 # flatten non-agent preds
 argmax_lexical_preds = np.array([x for xs in argmax_lexical_preds for x in xs])
 monotonic_lexical_preds = np.array([x for xs in monotonic_lexical_preds for x in xs])
-first_lexical_preds = np.array([x for xs in first_lexical_preds for x in xs])
+first_monotonic_lexical_preds = np.array([x for xs in first_monotonic_lexical_preds for x in xs])
+first_argmax_lexical_preds = np.array([x for xs in first_argmax_lexical_preds for x in xs])
 agent_argmax_lexical_preds = np.array(agent_argmax_lexical_preds)
 agent_monotonic_lexical_preds = np.array(agent_monotonic_lexical_preds)
-agent_first_lexical_preds = np.array(agent_first_lexical_preds)
+agent_first_monotonic_lexical_preds = np.array(agent_first_monotonic_lexical_preds)
+agent_first_argmax_lexical_preds = np.array(agent_first_argmax_lexical_preds)
 
 true_labels = np.array([x for xs in true_labels for x in xs])
 agent_true_labels = np.array(agent_true_labels)
 
-
 argmax_sbert_preds = np.array([x for xs in argmax_sbert_preds for x in xs])
 monotonic_sbert_preds = np.array([x for xs in monotonic_sbert_preds for x in xs])
-first_sbert_preds = np.array([x for xs in first_sbert_preds for x in xs])
+first_monotonic_sbert_preds = np.array([x for xs in first_monotonic_sbert_preds for x in xs])
+first_argmax_sbert_preds = np.array([x for xs in first_argmax_sbert_preds for x in xs])
 agent_argmax_sbert_preds = np.array(agent_argmax_sbert_preds)
 agent_monotonic_sbert_preds = np.array(agent_monotonic_sbert_preds)
-agent_first_sbert_preds = np.array(agent_first_sbert_preds)
+agent_first_monotonic_sbert_preds = np.array(agent_first_monotonic_sbert_preds)
+agent_first_argmax_sbert_preds = np.array(agent_first_argmax_sbert_preds)
 
 print("argmax lexical")
 print(accscore(true_labels, argmax_lexical_preds))
@@ -167,10 +181,12 @@ print("monotonic lexical")
 print(accscore(true_labels, monotonic_lexical_preds))
 print("agent monotonic lexical")
 print(accscore(agent_true_labels, agent_monotonic_lexical_preds))
-print("first lexical")
-print(accscore(true_labels, first_lexical_preds))
-print("agent first lexical")
-print(accscore(agent_true_labels, agent_first_lexical_preds))
+print("first monotonic lexical")
+print(accscore(true_labels, first_monotonic_lexical_preds))
+print("agent first monotonic lexical")
+print(accscore(agent_true_labels, agent_first_monotonic_lexical_preds))
+print("agent first argmax lexical")
+print(accscore(agent_true_labels, agent_first_argmax_lexical_preds))
 
 print("argmax sbert")
 print(accscore(true_labels, argmax_sbert_preds))
@@ -180,7 +196,9 @@ print("monotonic sbert")
 print(accscore(true_labels, monotonic_sbert_preds))
 print("agent monotonic sbert")
 print(accscore(agent_true_labels, agent_monotonic_sbert_preds))
-print("first sbert")
-print(accscore(true_labels, first_sbert_preds))
-print("agent first sbert")
-print(accscore(agent_true_labels, agent_first_sbert_preds))
+print("first monotonic sbert")
+print(accscore(true_labels, first_monotonic_sbert_preds))
+print("agent first monotonic sbert")
+print(accscore(agent_true_labels, agent_first_monotonic_sbert_preds))
+print("agent first argmax sbert")
+print(accscore(agent_true_labels, agent_first_argmax_sbert_preds))

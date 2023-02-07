@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from torch_struct import LinearChainCRF
 
@@ -14,10 +15,17 @@ def monotonic_prediction(unary):
     binary_argmax = crf.argmax.detach()
     return binary_argmax.nonzero()[:,2]
 
-def first_prediction(unary):
+def first_monotonic_prediction(unary):
     monotonic_preds = monotonic_prediction(unary)
     # annotation has first prediction as -1
     return [-1] + monotonic_preds[1:].masked_fill(
         monotonic_preds[1:] <= monotonic_preds[:-1],
         -1,
     ).tolist()
+
+def first_argmax_prediction(unary):
+    preds = unary.argmax(-1).numpy()
+    vals, idxs = np.unique(preds, return_index=True)
+    x = np.full(preds.shape, -1)
+    x[idxs] = vals
+    return x
