@@ -12,6 +12,7 @@ def get_args():
     # objective stuff
     parser.add_argument("--interact_data", action="store_true")
     parser.add_argument("--eval_only", action="store_true")
+    parser.add_argument("--monotonic_train", action="store_true")
 
     parser.add_argument("--true_z", action="store_true")
     parser.add_argument("--kl_weight", default=1.0, type=float)
@@ -31,7 +32,7 @@ def get_args():
     parser.add_argument("--max_length", default=256, type=int)
     parser.add_argument("--max_turn_length", default=32, type=int)
     parser.add_argument("--max_step_length", default=128, type=int)
-    parser.add_argument("--max_turns", default=16, type=int)
+    parser.add_argument("--max_turns", default=128, type=int, help="not used anymore, so set very high. set lower if model ignores history, since this leads to tons of padding.")
 
 
     parser.add_argument(

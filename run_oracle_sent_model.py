@@ -30,6 +30,12 @@ from torch import nn
 
 from eba_utils import prepare_optim_and_scheduler, prepare_optim_and_scheduler2
 from subflow_args import get_args
+from inference_utils import (
+    monotonic_partition,
+    monotonic_prediction,
+    first_monotonic_prediction,
+    first_argmax_prediction,
+)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 seed = 555
@@ -44,7 +50,11 @@ agent_token = "Ġagent"
 action_token = "Ġaction"
 
 
-def run_model(batch, docs, doc_sents, doc_num_sents, model, allow_dummy_step=False):
+def run_model(
+    batch, docs, doc_sents, doc_num_sents, model,
+    allow_dummy_step=False,
+    monotonic=False,
+):
     x_ids = batch["x_ids"].to(device)
     x_mask = batch["x_mask"].to(device)
 
@@ -105,11 +115,16 @@ def run_model(batch, docs, doc_sents, doc_num_sents, model, allow_dummy_step=Fal
 
     log_p_turn_z = log_p_turn_given_z + log_p_z[:,:,None]
 
-    turn_logprobs = log_p_turn_z.logsumexp(1)
+    if monotonic:
+        #logprob_dial = monotonic_partition_old(log_p_turn_z.permute(0,2,1))
+        logprob_dial = monotonic_partition(log_p_turn_given_z.permute(0,2,1), padding_z)
+    else:
+        turn_logprobs = log_p_turn_z.logsumexp(1)
+        logprob_dial = turn_logprobs.sum(-1)
 
     #turn_mask = torch.arange(x_len) <= turn_numbers[:,0,-1,None]
     #conversation_logprob = turn_logprobs.masked_fill(~turn_mask.to(device), 0).sum(-1)
-    neg_log_py = -turn_logprobs.sum(-1).mean()
+    neg_log_py = -logprob_dial.mean()
 
     return neg_log_py, tok_loss, log_p_turn_z
 
@@ -128,6 +143,12 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
     agent_acc_metric = load_metric("accuracy")
     agent_filter_acc_metric = load_metric("accuracy")
 
+    # new metrics
+    monotonic_acc = load_metric("accuracy")
+    first_monotonic_acc = load_metric("accuracy")
+    argmax_acc = load_metric("accuracy")
+    first_argmax_acc = load_metric("accuracy")
+
     if not args.no_save_results and split == "Valid":
         sent_preds = []
         sent_golds = []
@@ -138,8 +159,8 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
         agent_sent_filter = []
 
     num_docs = docs.input_ids.shape[0]
-    #for step, batch in enumerate(dataloader):
-    for step, batch in track(enumerate(dataloader), total=len(dataloader)):
+    for step, batch in enumerate(dataloader):
+    #for step, batch in track(enumerate(dataloader), total=len(dataloader)):
         bsz = batch["x_ids"].shape[0]
         num_z = num_docs
 
@@ -147,7 +168,6 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
             batch, docs, doc_sents, doc_num_sents, model,
             allow_dummy_step=args.dummy_step,
         )
-
 
         y_nll += loss * bsz
         num_examples += bsz
@@ -162,7 +182,8 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
             # check against labels with contiguous annotations
             if id_str in labels:
                 z_labels = torch.tensor(labels[id_str])
-                num_turns = min(len(z_labels), max_turns)
+                #num_turns = min(len(z_labels), max_turns)
+                num_turns = len(z_labels)
                 logp = log_pturn_z[i,:,:num_turns]
                 z_hat = logp.argmax(0)
                 z_labels = z_labels[:num_turns]
@@ -181,10 +202,44 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
             # but only the turns that are on
             if id_str in agent_labels:
                 z_labels = torch.tensor(agent_labels[id_str])
-                num_turns = min(len(z_labels), max_turns)
+                #num_turns = min(len(z_labels), max_turns)
+                num_turns = len(z_labels)
                 logp = log_pturn_z[i,:,:num_turns]
                 z_hat = logp.argmax(0)
                 z_labels = z_labels[:num_turns]
+
+                # decision rules
+                unary = logp.T
+                monotonic_preds = monotonic_prediction(unary)
+                argmax_preds = unary.argmax(-1)
+                first_monotonic_preds = first_monotonic_prediction(unary)
+                first_argmax_preds = first_argmax_prediction(unary)
+
+                agent_turn_mask = batch["is_agent_turn"][i,:num_turns]
+                monotonic_acc.add_batch(
+                    predictions=monotonic_preds[agent_turn_mask],
+                    references=z_labels[agent_turn_mask],
+                )
+                first_monotonic_acc.add_batch(
+                    predictions=first_monotonic_preds[agent_turn_mask],
+                    references=z_labels[agent_turn_mask],
+                )
+                argmax_acc.add_batch(
+                    predictions=argmax_preds[agent_turn_mask],
+                    references=z_labels[agent_turn_mask],
+                )
+                first_argmax_acc.add_batch(
+                    predictions=first_argmax_preds[agent_turn_mask],
+                    references=z_labels[agent_turn_mask],
+                )
+                # /decision rules
+
+                # predictions for agent turns
+                agent_turn_mask = batch["is_agent_turn"][i,:num_turns]
+                acc_metric.add_batch(
+                    predictions=z_hat[agent_turn_mask],
+                    references=z_labels[agent_turn_mask],
+                )
 
                 # prediction for on-turns
                 agent_turn_mask = z_labels != -1
@@ -214,6 +269,13 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
     agent_z_acc = agent_acc_metric.compute()
     agent_f_acc = agent_filter_acc_metric.compute()
 
+    # decision rules
+    monotonic_acc = monotonic_acc.compute()
+    first_monotonic_acc = first_monotonic_acc.compute()
+    argmax_acc = argmax_acc.compute()
+    first_argmax_acc = first_argmax_acc.compute()
+    # /decision rules
+
     if not args.nolog:
         wandb.log(
             {
@@ -222,6 +284,10 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
                 f"{split} All Step Acc": z_acc,
                 f"{split} Step Acc": agent_z_acc,
                 f"{split} Filter Acc": agent_f_acc,
+                f"{split} Monotonic Step Acc": monotonic_acc,
+                f"{split} First monotonic Step Acc": first_monotonic_acc,
+                f"{split} Argmax Step Acc": argmax_acc,
+                f"{split} First argmax Step Acc": first_argmax_acc,
             }
         )
     if not args.no_save_results and split == "Valid":
@@ -251,6 +317,14 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
     print(agent_z_acc)
     print("agent filter acc")
     print(agent_f_acc)
+    print("monotonic acc")
+    print(monotonic_acc)
+    print("first monotonic acc")
+    print(first_monotonic_acc)
+    print("argmax acc")
+    print(argmax_acc)
+    print("first argmax acc")
+    print(first_argmax_acc)
 
     return avg_loss
 
@@ -275,6 +349,7 @@ def main():
         f"sp-{args.subsample_passes} "
         f"ip-{args.init_from_previous} "
         f"ds-{args.dummy_step} "
+        f"mt-{args.monotonic_train} "
     )
     args.run_name = run_name
 
@@ -372,8 +447,11 @@ def main():
                             f"{args.output_model_dir}/{run_name}-answer"
                         )
                 answer_model.train()
-            loss, _, _ = run_model(batch, docs, doc_sents, doc_num_sents, answer_model,
-                allow_dummy_step=args.dummy_step)
+            loss, _, _ = run_model(
+                batch, docs, doc_sents, doc_num_sents, answer_model,
+                allow_dummy_step=args.dummy_step,
+                monotonic=args.monotonic_train,
+            )
             loss.backward()
             if (
                 step % args.gradient_accumulation_steps == 0
