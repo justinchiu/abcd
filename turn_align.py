@@ -27,7 +27,9 @@ bm25s = [
     for sents in doc_sents
 ]
 
-model_predictions = torch.load("logging/oracle-sent-model-26-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 ip-True ds-False |step-5000.pt")
+#model_predictions = torch.load("logging/oracle-sent-model-26-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 ip-True ds-False |step-5000.pt")
+path = "logging/oracle-sent-model-28f-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 ip-False ds-False mt-True |step-2000.pt"
+model_predictions = torch.load(path)
 
 # sentence_transformers
 from sentence_transformers import SentenceTransformer
@@ -85,10 +87,15 @@ def get_align(score_fn, name):
 
         unary = score_fn(turns, idx, str_id)
 
-        monotonic_preds = monotonic_prediction(unary)
-        argmax_preds = unary.argmax(-1)
-        first_monotonic_preds = first_monotonic_prediction(unary)
-        first_argmax_preds = first_argmax_prediction(unary)
+        agent_mask = np.array([s == "agent" for s,_ in e["turns"]])
+
+        agent_unary = unary[agent_mask]
+        this_true_labels = labels[agent_mask]
+
+        monotonic_preds = monotonic_prediction(agent_unary)
+        argmax_preds = agent_unary.argmax(-1)
+        first_monotonic_preds = first_monotonic_prediction(agent_unary)
+        first_argmax_preds = first_argmax_prediction(agent_unary)
 
         all_argmax_preds.append(argmax_preds)
         all_monotonic_preds.append(monotonic_preds)
@@ -96,8 +103,12 @@ def get_align(score_fn, name):
         all_first_argmax_preds.append(first_argmax_preds)
 
         T = unary.shape[0]
-        true_labels.append(labels[:T])
+        true_labels.append(this_true_labels)
 
+        monotonic_preds = monotonic_prediction(unary)
+        argmax_preds = unary.argmax(-1)
+        first_monotonic_preds = first_monotonic_prediction(unary)
+        first_argmax_preds = first_argmax_prediction(unary)
         for speaker, label, argmax_pred, monotonic_pred, first_monotonic_pred, first_argmax_pred in zip(
             speakers,
             labels,

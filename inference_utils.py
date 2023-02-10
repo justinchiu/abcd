@@ -16,7 +16,12 @@ def monotonic_prediction(unary):
     return binary_argmax.nonzero()[:,2]
 
 def first_monotonic_prediction(unary):
-    monotonic_preds = monotonic_prediction(unary)
+    preds = monotonic_prediction(unary).cpu().numpy()
+    vals, idxs = np.unique(preds, return_index=True)
+    x = np.full(preds.shape, -1)
+    x[idxs] = vals
+    x[0] = -1
+    return torch.tensor(x)
     # annotation has first prediction as -1
     return torch.tensor([-1] + monotonic_preds[1:].masked_fill(
         monotonic_preds[1:] <= monotonic_preds[:-1],
