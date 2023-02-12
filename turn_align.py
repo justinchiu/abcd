@@ -51,6 +51,10 @@ with Path("data/agent_step_annotations.json").open("r") as f:
 agent_labels = agent_all_labels["dev"]
 
 def get_align(score_fn, name):
+    all_scores = []
+    all_labels = []
+    all_ids = []
+
     all_argmax_preds = []
     all_monotonic_preds = []
     all_first_monotonic_preds = []
@@ -86,6 +90,12 @@ def get_align(score_fn, name):
         doc_steps = doc_sents[idx]
 
         unary = score_fn(turns, idx, str_id)
+
+        # logging
+        all_ids.append(str_id)
+        all_labels.append(labels)
+        all_scores.append(unary)
+        # /logging
 
         agent_mask = np.array([s == "agent" for s,_ in e["turns"]])
 
@@ -124,6 +134,8 @@ def get_align(score_fn, name):
                 agent_first_argmax_preds.append(first_argmax_pred)
                 agent_true_labels.append(label)
 
+    import pdb; pdb.set_trace()
+
     true_labels = np.array([x for xs in true_labels for x in xs])
     agent_true_labels = np.array(agent_true_labels)
 
@@ -153,6 +165,13 @@ def get_align(score_fn, name):
     print(accscore(true_labels, first_argmax_preds))
     print(f"agent first argmax {name}")
     print(accscore(agent_true_labels, agent_first_argmax_preds))
+
+    savepath = f"logging/oralce-sent-{name}.pt"
+    torch.save(
+        (all_scores, all_labels, all_ids),
+        savepath,
+    )
+    print(f"Saved predictions to {savepath}")
 
 def lexical_score_fn(turns, idx, str_id):
     # lexical

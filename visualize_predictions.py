@@ -8,6 +8,7 @@ import torch
 import streamlit as st
 
 from subflow_data import convert_manual, get_abcd_dataset
+from inference_utils import first_monotonic_prediction
 
 random.seed(1234)
 
@@ -70,14 +71,22 @@ document_sents = guidelines[subflow_map[subflow]]
 
 st.write(f"# Conversation id: {id}")
 
+print("argmax")
 print(preds[example_num].argmax(0))
+print("true")
 print(labels[example_num])
 
 if id in all_labels[split] and id in agent_labels[split]:
+
+    unary = preds[example_num].T
+    thispreds = first_monotonic_prediction(unary)
+    print("monotonic")
+    print(thispreds)
+
     st.write("## Dialogue")
     for t, ((speaker, turn), step, agent_step) in enumerate(zip(dialogue, all_labels[split][id], agent_labels[split][id])):
-        blackstring = f"(turn {t}, step {step}, astep {agent_step}, pred {preds[example_num][:,t].argmax(0)}) {speaker}: {turn}"
-        colorstring = f"<p style='color:Blue'>(turn {t}, step {step}, astep {agent_step}, pred {preds[example_num][:,t].argmax(0)}) {speaker}: {turn}</p>"
+        blackstring = f"(turn {t}, step {step}, astep {agent_step}, pred {thispreds[t]}) {speaker}: {turn}"
+        colorstring = f"<p style='color:Blue'>(turn {t}, step {step}, astep {agent_step}, pred {thispreds[t]}) {speaker}: {turn}</p>"
         string = blackstring if agent_step == -1 or speaker != "agent" else colorstring
         st.markdown(string, unsafe_allow_html=True)
 
