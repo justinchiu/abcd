@@ -53,6 +53,15 @@ else:
 path = "logging/oracle-sent-model-28f-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 ip-False ds-False mt-True |step-250.pt"
 preds, labels, ids = torch.load(path)
 
+id2pred = {id: pred for id, pred in zip(ids, preds)}
+
+lexicalpath = "logging/oracle-sent-lexical.pt"
+lexicalpreds, lexlabels, lexids = torch.load(lexicalpath)
+lexids = [int(id) for id in lexids]
+
+lexid2pred = {id: pred for id, pred in zip(lexids, lexicalpreds)}
+
+
 guidelines, subflow_map = convert_manual(ontology, manual, False)
 
 example_num = st.number_input("Example number", min_value=0, max_value=len(ids), value=0)
@@ -71,22 +80,30 @@ document_sents = guidelines[subflow_map[subflow]]
 
 st.write(f"# Conversation id: {id}")
 
-print("argmax")
-print(preds[example_num].argmax(0))
 print("true")
 print(labels[example_num])
 
-if id in all_labels[split] and id in agent_labels[split]:
+if id in agent_labels[split]:
+    modelunary = id2pred[int(id)].T
+    modelargmax = modelunary.argmax(1) 
+    print("model argmax")
+    print(modelargmax)
+    modelpreds = first_monotonic_prediction(modelunary)
+    print("model monotonic")
+    print(modelpreds)
 
-    unary = preds[example_num].T
-    thispreds = first_monotonic_prediction(unary)
-    print("monotonic")
-    print(thispreds)
+    lexunary = lexid2pred[int(id)]
+    lexargmax = lexunary.argmax(1) 
+    print("lex argmax")
+    print(lexargmax)
+    lexpreds = first_monotonic_prediction(lexunary)
+    print("lex monotonic")
+    print(lexpreds)
 
     st.write("## Dialogue")
-    for t, ((speaker, turn), step, agent_step) in enumerate(zip(dialogue, all_labels[split][id], agent_labels[split][id])):
-        blackstring = f"(turn {t}, step {step}, astep {agent_step}, pred {thispreds[t]}) {speaker}: {turn}"
-        colorstring = f"<p style='color:Blue'>(turn {t}, step {step}, astep {agent_step}, pred {thispreds[t]}) {speaker}: {turn}</p>"
+    for t, ((speaker, turn), agent_step) in enumerate(zip(dialogue, agent_labels[split][id])):
+        blackstring = f"(turn {t}, step {agent_step}, model pred {modelpreds[t]}, lexpred {lexpreds[t]}) {speaker}: {turn}"
+        colorstring = f"<p style='color:Blue'>{blackstring}</p>"
         string = blackstring if agent_step == -1 or speaker != "agent" else colorstring
         st.markdown(string, unsafe_allow_html=True)
 
