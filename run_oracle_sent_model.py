@@ -54,6 +54,7 @@ def run_model(
     batch, docs, doc_sents, doc_num_sents, model,
     allow_dummy_step=False,
     monotonic=False,
+    decoder_turn_attention=False,
 ):
     x_ids = batch["x_ids"].to(device)
     x_mask = batch["x_mask"].to(device)
@@ -79,10 +80,40 @@ def run_model(
         x_ids[:, None].repeat(1, num_z, 1).view(bsz * num_z, x_len)
     )
 
+    input_ids = sent_ids[doc_labels].view(bsz * num_z, z_len)
+    inputs_embeds = model.model.decoder.embed_tokens(input_ids) * model.model.decoder.embed_scale
+    attention_mask = sent_mask[doc_labels].view(bsz * num_z, z_len)
+    decoder_causal_attention_mask = model.model.decoder._prepare_decoder_attention_mask(
+        None, labels.shape, inputs_embeds, 0,
+    )
+    # decoder_causal_attention_mask: bsz x 1 x tgt_seq_len x src_seq_len
+     
+    is_turn_mask = batch["agent_turn_mask"] | batch["customer_turn_mask"] | batch["action_turn_mask"]
+    is_turn_mask = is_turn_mask[:,None,:].repeat(1, num_z, 1)
+    turn_numbers = is_turn_mask.cumsum(-1) - 1
+    turn_numbers[:,:,0] = 0
+    # input        = <s> agent:
+    # turn_numbers = 0   1 ...
+    # the <s> = 0 is a waste of a turn number, so fold it into first turn
+
+    tn = turn_numbers.view(bsz * num_z, x_len).to(device)
+    same_turn_mask= tn[:,:,None] == tn[:,None]
+    minval = torch.finfo(decoder_causal_attention_mask.dtype).min
+    decoder_turn_attention_mask = torch.full(
+        decoder_causal_attention_mask.shape, minval, device=decoder_causal_attention_mask.device)
+    decoder_turn_attention_mask = decoder_turn_attention_mask.masked_fill(same_turn_mask[:,None], 0)
+    # decoder_turn_attention_mask: bsz x 1 x tgt_seq_len x src_seq_len
+
+    decoder_attention_mask = (
+        decoder_causal_attention_mask + decoder_turn_attention_mask
+        if decoder_turn_attention else None
+    )
+
     out = model(
         input_ids=sent_ids[doc_labels].view(bsz * num_z, z_len),
         attention_mask=sent_mask[doc_labels].view(bsz * num_z, z_len),
         labels=labels,
+        decoder_expanded_attention_mask = decoder_attention_mask,
     )
     logits = out.logits.log_softmax(-1)
     N, T, V = logits.shape
@@ -92,13 +123,6 @@ def run_model(
     #tok_loss[~x_mask.bool()[:, None].expand(bsz, num_z, T)] = 0
     tok_loss = tok_loss.masked_fill(~x_mask.bool()[:, None].expand(bsz, num_z, T), 0)
 
-    is_turn_mask = batch["agent_turn_mask"] | batch["customer_turn_mask"] | batch["action_turn_mask"]
-    is_turn_mask = is_turn_mask[:,None,:].repeat(1, num_z, 1)
-    turn_numbers = is_turn_mask.cumsum(-1) - 1
-    turn_numbers[:,:,0] = 0
-    # input        = <s> agent:
-    # turn_numbers = 0   1 ...
-    # the <s> = 0 is a waste of a turn number, so fold it into first turn
 
     loss_buffer = torch.zeros_like(tok_loss)
     log_p_turn_given_z = torch.scatter_add(loss_buffer, -1, turn_numbers.to(device), tok_loss)
@@ -167,6 +191,7 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
         loss, log_py_z, log_pturn_z = run_model(
             batch, docs, doc_sents, doc_num_sents, model,
             allow_dummy_step=args.dummy_step,
+            decoder_turn_attention=args.decoder_turn_attention,
         )
 
         y_nll += loss * bsz
@@ -350,6 +375,7 @@ def main():
         f"ip-{args.init_from_previous} "
         f"ds-{args.dummy_step} "
         f"mt-{args.monotonic_train} "
+        f"dta-{args.decoder_turn_attention} "
     )
     args.run_name = run_name
 
@@ -451,6 +477,7 @@ def main():
                 batch, docs, doc_sents, doc_num_sents, answer_model,
                 allow_dummy_step=args.dummy_step,
                 monotonic=args.monotonic_train,
+                decoder_turn_attention=args.decoder_turn_attention,
             )
             loss.backward()
             if (

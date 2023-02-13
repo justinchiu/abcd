@@ -13,6 +13,7 @@ def get_args():
     parser.add_argument("--interact_data", action="store_true")
     parser.add_argument("--eval_only", action="store_true")
     parser.add_argument("--monotonic_train", action="store_true")
+    parser.add_argument("--decoder_turn_attention", action="store_true")
 
     parser.add_argument("--true_z", action="store_true")
     parser.add_argument("--kl_weight", default=1.0, type=float)
