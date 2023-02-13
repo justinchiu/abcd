@@ -134,8 +134,6 @@ def get_align(score_fn, name):
                 agent_first_argmax_preds.append(first_argmax_pred)
                 agent_true_labels.append(label)
 
-    import pdb; pdb.set_trace()
-
     true_labels = np.array([x for xs in true_labels for x in xs])
     agent_true_labels = np.array(agent_true_labels)
 
@@ -166,7 +164,7 @@ def get_align(score_fn, name):
     print(f"agent first argmax {name}")
     print(accscore(agent_true_labels, agent_first_argmax_preds))
 
-    savepath = f"logging/oralce-sent-{name}.pt"
+    savepath = f"logging/oracle-sent-{name}.pt"
     torch.save(
         (all_scores, all_labels, all_ids),
         savepath,

@@ -1,0 +1,52 @@
+prepare abcd dev
+argmax lexical
+0.2845528455284553
+agent argmax lexical
+0.2845528455284553
+monotonic lexical
+0.3008130081300813
+agent monotonic lexical
+0.3170731707317073
+first monotonic lexical
+0.6016260162601627
+agent first monotonic lexical
+0.6422764227642277
+first argmax lexical
+0.3902439024390244
+agent first argmax lexical
+0.45528455284552843
+Saved predictions to logging/oracle-sent-lexical.pt
+argmax sbert
+0.36585365853658536
+agent argmax sbert
+0.36585365853658536
+monotonic sbert
+0.36585365853658536
+agent monotonic sbert
+0.34146341463414637
+first monotonic sbert
+0.5772357723577236
+agent first monotonic sbert
+0.5853658536585366
+first argmax sbert
+0.3983739837398374
+agent first argmax sbert
+0.42276422764227645
+Saved predictions to logging/oracle-sent-sbert.pt
+argmax model
+0.23577235772357724
+agent argmax model
+0.23577235772357724
+monotonic model
+0.2764227642276423
+agent monotonic model
+0.2601626016260163
+first monotonic model
+0.5040650406504065
+agent first monotonic model
+0.5121951219512195
+first argmax model
+0.34959349593495936
+agent first argmax model
+0.3252032520325203
+Saved predictions to logging/oracle-sent-model.pt
