@@ -12,8 +12,8 @@
 #SBATCH --get-user-env                       # retrieve the users login environment
 #SBATCH --mem=16000                          # server memory requested (per node)
 #SBATCH -t 48:00:00                           # Time limit (hh:mm:ss)
-##SBATCH --nodelist=rush-compute-02 # Request partition
-#SBATCH --nodelist=rush-compute-01 # Request partition
+#SBATCH --nodelist=rush-compute-02 # Request partition
+##SBATCH --nodelist=rush-compute-01 # Request partition
 #SBATCH --partition=rush,gpu # Request partition
 #SBATCH --gres=gpu:1                  # Type/number of GPUs needed
 ##SBATCH --gres=gpu:a6000:1                  # Type/number of GPUs needed
@@ -64,4 +64,11 @@ py113env
 
 # oracle sent bart-large ml256 2/13
 #python run_oracle_sent_model.py --batch_size 2 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 213 --gradient_accumulation_steps 8 --monotonic_train --max_turns 128 --answer_model_dir facebook/bart-large
-python run_oracle_sent_model.py --batch_size 2 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 213 --gradient_accumulation_steps 8 --monotonic_train --max_turns 128 --answer_model_dir facebook/bart-large --learning_rate 1e-5
+#python run_oracle_sent_model.py --batch_size 2 --eval_batch_size 4 --max_length 256 --eval_steps 250 --epoch 10 --prefix 213 --gradient_accumulation_steps 8 --monotonic_train --max_turns 128 --answer_model_dir facebook/bart-large --learning_rate 1e-5
+
+# oracle sent bart-base ml512 2/20
+#python run_oracle_sent_model.py --batch_size 1 --eval_batch_size 4 --max_length 512 --eval_steps 250 --epoch 10 --prefix 213 --gradient_accumulation_steps 16 --max_turns 128 --decoder_turn_attention --learning_rate 2e-5
+#python run_oracle_sent_model.py --batch_size 1 --eval_batch_size 4 --max_length 512 --eval_steps 250 --epoch 10 --prefix 213 --gradient_accumulation_steps 16 --max_turns 128 --decoder_turn_attention --learning_rate 1e-5
+
+# oracle sent bart-base ml256 2/20
+python run_oracle_turn_model.py --batch_size 16 --eval_batch_size 16 --max_length 32 --max_step_length 128 --eval_steps 250 --epoch 10 --prefix 220 --gradient_accumulation_steps 8 --max_turns 128 --answer_model_dir facebook/bart-large --learning_rate 1e-5
