@@ -218,7 +218,7 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
             agent_sent_ids.append(id)
 
 
-    avg_loss = y_nll.item() / num_examples
+    avg_loss = y_nll / len(dials)
 
     # decision rules
     monotonic_acc = monotonic_acc.compute()
