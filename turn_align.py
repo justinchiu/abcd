@@ -28,7 +28,7 @@ bm25s = [
 ]
 
 #model_predictions = torch.load("logging/oracle-sent-model-26-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 ip-True ds-False |step-5000.pt")
-path = "logging/oracle-sent-model-28f-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 ip-False ds-False mt-True |step-2000.pt"
+path = "logging/oracle-sent-model-213-bart-base lr-1e-05 bs-16 dt-0 ds-0 ml-512 s-subflow sk-0 ss-250 sp-0 ip-False ds-False mt-True dta-True |step-4000.pt"
 model_predictions = torch.load(path)
 
 # sentence_transformers
