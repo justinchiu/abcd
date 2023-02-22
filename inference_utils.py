@@ -2,6 +2,12 @@ import numpy as np
 import torch
 from torch_struct import LinearChainCRF
 
+def first(preds):
+    vals, idxs = np.unique(preds, return_index=True)
+    x = np.full(preds.shape, -1)
+    x[idxs] = vals
+    return torch.tensor(x)
+
 def monotonic_prediction(unary):
     T, Z = unary.shape
     potentials = unary[:,:,None].repeat(1,1,Z)

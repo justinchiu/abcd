@@ -7,7 +7,12 @@ from rank_bm25 import BM25Okapi
 from sklearn.metrics import accuracy_score as accscore
 import torch
 
-from inference_utils import monotonic_prediction, first_monotonic_prediction, first_argmax_prediction
+from inference_utils import (
+    first,
+    monotonic_prediction,
+    first_monotonic_prediction,
+    first_argmax_prediction,
+)
 
 from subflow_data import get_abcd_dataset
 
@@ -86,6 +91,7 @@ def get_align(score_fn, name):
 
         # check lexical accuracy of align/not
         labels = np.array(agent_labels[str_id])
+        labels = first(labels)
 
         doc_steps = doc_sents[idx]
 
