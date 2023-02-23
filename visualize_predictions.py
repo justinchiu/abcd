@@ -50,7 +50,8 @@ else:
 
 #path = "logging/oracle-sent-model-119-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 |step-5000.pt"
 #path = "logging/oracle-sent-model-119-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-512 s-subflow sk-0 ss-250 sp-0 |step-5000.pt"
-path = "logging/oracle-sent-model-28f-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 ip-False ds-False mt-True |step-250.pt"
+#path = "logging/oracle-sent-model-28f-bart-base lr-2e-05 bs-16 dt-0 ds-0 ml-256 s-subflow sk-0 ss-250 sp-0 ip-False ds-False mt-True |step-250.pt"
+path = "logging/oracle-sent-model-213-bart-base lr-1e-05 bs-16 dt-0 ds-0 ml-512 s-subflow sk-0 ss-250 sp-0 ip-False ds-False mt-True dta-True |step-4000.pt"
 preds, labels, ids = torch.load(path)
 
 id2pred = {id: pred for id, pred in zip(ids, preds)}
@@ -80,10 +81,11 @@ document_sents = guidelines[subflow_map[subflow]]
 
 st.write(f"# Conversation id: {id}")
 
-print("true")
-print(labels[example_num])
 
 if id in agent_labels[split]:
+    print("true")
+    print(agent_labels[split][id])
+
     modelunary = id2pred[int(id)].T
     modelargmax = modelunary.argmax(1) 
     print("model argmax")
