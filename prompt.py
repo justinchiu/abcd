@@ -130,7 +130,7 @@ for e in val_dataset:
 
     agent_mask = np.array([s == "agent" for s,_ in e["turns"]])
 
-    this_true_labels = labels[agent_mask]
+    this_true_labels = first_labels[agent_mask]
     agent_unary = torch.tensor([scores for (turn, scores) in sorted(gpt_scores[str_id].items())])
 
     monotonic_preds = monotonic_prediction(agent_unary)
