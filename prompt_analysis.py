@@ -58,10 +58,10 @@ def gpt(step, turn, stop_tokens=None, query_kwargs=None):
     idx = response["logprobs"]["tokens"].index("#")
     return logprobs[idx+1:]
 
-turn = "Agent: Ok, I see your refund is In Progress and it looks like it should be going through to completion later today or by tomorrow at the latest"
-span = """Agent: Ok, I see your refund is In Progress and it looks like it should be going through to completion later today or by tomorrow at the latest
-Customer: okay, thank you
-Agent: you're welcome"""
+turn = "agent: Ok, I see your refund is In Progress and it looks like it should be going through to completion later today or by tomorrow at the latest"
+span = """agent: Ok, I see your refund is In Progress and it looks like it should be going through to completion later today or by tomorrow at the latest
+customer: okay, thank you
+agent: you're welcome"""
 
 step0 = """Customers want to know the status and payment method of their refund. In this case:"""
 step1 = """Pull up Account: Get Full Name or Account ID for [Pull up Account]"""
@@ -88,6 +88,22 @@ step5 = """As usual, end by asking if the customer needs anything else."""
 
 steps = [step0,step1,step2,step3,step4,step5]
 
+history = """\
+agent: Hi, how may I help you?
+customer: Yes i would like to double check the status of my refund
+agent: ok, what do you want to check?
+customer: i would like to know the status of my refund
+agent: ok, Can I have your full name or Account ID please?
+customer: Joseph Banter and my account is AFG5674G
+action: Account has been pulled up for AFG5674G.
+agent: Can I also have your Username, email and Order ID please?
+agent: Are you there?
+customer: josephb7, email is josephb7@email.com and order id is 2033568069
+customer: yes i was getting the info
+agent: sorry, we have a lot of disconnects lately
+action: Purchase validation in progress ...
+"""
 
 for step in steps:
-    print(np.sum(gpt(step, turn)))
+    #print(np.sum(gpt(history + "instruction: " + step, turn)))
+    print(np.sum(gpt(history + "instruction: " + step, span)))
