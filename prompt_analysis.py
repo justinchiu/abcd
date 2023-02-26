@@ -36,8 +36,8 @@ def completion_with_backoff(**kwargs):
     return openai.Completion.create(**kwargs)
 
 def gpt(step, turn, stop_tokens=None, query_kwargs=None):
-    prompt = f"in order to {step}\n#a customer representative said, {turn}"
-    prompt = f"{step}\n# Agent: a customer representative said, {turn}"
+    #prompt = f"in order to {step}\n#a customer representative said, {turn}"
+    prompt = f"{step}\n#{turn}"
     use_query_kwargs = {
         'engine': model_name,
         'max_tokens': 0,
@@ -105,5 +105,6 @@ action: Purchase validation in progress ...
 """
 
 for step in steps:
+    print(np.sum(gpt("instruction: " + step, span)))
     #print(np.sum(gpt(history + "instruction: " + step, turn)))
-    print(np.sum(gpt(history + "instruction: " + step, span)))
+    #print(np.sum(gpt(history + "instruction: " + step, span)))
