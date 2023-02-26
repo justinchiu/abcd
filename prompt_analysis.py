@@ -105,6 +105,6 @@ action: Purchase validation in progress ...
 """
 
 for step in steps:
-    print(np.sum(gpt("instruction: " + step, span)))
+    #print(np.sum(gpt("instruction: " + step, turn)))
     #print(np.sum(gpt(history + "instruction: " + step, turn)))
-    #print(np.sum(gpt(history + "instruction: " + step, span)))
+    print(np.sum(gpt(history + "instruction: " + step, span)))
