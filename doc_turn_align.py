@@ -142,8 +142,10 @@ def model_score_fn(turns, idx, str_id):
     return model_predictions[0][model_idx].T
 
 
-get_align(
-    lexical_doc_score_fn, lexical_score_fn, first_monotonic_arg_max,
-    name="lexical-first-mono",
-    k=55,
-)
+for k in [1, 2, 3, 4, 5, 10, 25, 55]:
+    print(k)
+    get_align(
+        lexical_doc_score_fn, lexical_score_fn, first_monotonic_arg_max,
+        name="lexical-first-mono",
+        k=k,
+    )
