@@ -24,7 +24,6 @@ from transformers import AutoModel, AutoModelForSeq2SeqLM
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 from transformers import set_seed
 import torch
-from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch import nn
 
