@@ -117,7 +117,7 @@ for e in val_dataset:
     idx = subflow_map[subflow]
 
     #if str_id not in labels:
-    if str_id not in agent_labels:
+    if str_id not in agent_labels or str_id not in gpt_scores:
         continue
 
     speakers, turns = list(zip(*e["turns"]))

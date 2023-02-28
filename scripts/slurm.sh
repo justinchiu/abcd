@@ -75,4 +75,4 @@ py113env
 #python run_oracle_turn_model.py --batch_size 16 --eval_batch_size 16 --max_length 32 --max_step_length 128 --eval_steps 250 --epoch 10 --prefix 220 --gradient_accumulation_steps 8 --max_turns 128 --answer_model_dir facebook/bart-large --learning_rate 1e-5
 
 # doc step model ml256 2/28
-python run_oracle_sent_model.py --batch_size 1 --eval_batch_size 4 --max_length 256 --max_step_length 128 --eval_steps 250 --epoch 10 --prefix 228 --gradient_accumulation_steps 16 --max_turns 128 --learning_rate 1e-5 --num_z_samples 4 --monotonic_train --decoder_turn_attention --init_from_previous
+python run_doc_step_model.py --batch_size 1 --eval_batch_size 4 --max_length 256 --max_step_length 128 --eval_steps 250 --epoch 10 --prefix 228 --gradient_accumulation_steps 16 --max_turns 128 --learning_rate 1e-5 --num_z_samples 4 --monotonic_train --decoder_turn_attention --init_from_previous

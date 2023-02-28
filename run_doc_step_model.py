@@ -111,7 +111,7 @@ def run_model(
     is_turn_mask = is_turn_mask[:,None,:].repeat(1, num_docs * num_sents, 1)
     turn_numbers = is_turn_mask.cumsum(-1) - 1
     turn_numbers[:,:,0] = 0
-    turn_numbers = turn_numbers.view(bsz, num_docs, num_sents, sent_len)
+    turn_numbers = turn_numbers.view(bsz, num_docs, num_sents, x_len)
     # input        = <s> agent:
     # turn_numbers = 0   1 ...
     # the <s> = 0 is a waste of a turn number, so fold it into first turn

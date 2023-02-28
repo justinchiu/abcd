@@ -54,6 +54,7 @@ def score_step_aligned_turns(
     Given tok_loss = log p(words | doc, step), get log p(turn | doc, step).
     """
     bsz, num_docs, num_steps, step_len = sent_mask.shape
+    x_len = tok_loss.shape[-1]
 
     loss_buffer = torch.zeros_like(tok_loss)
     log_p_turn_given_z = torch.scatter_add(loss_buffer, -1, turn_numbers.to(device), tok_loss)
@@ -71,7 +72,7 @@ def score_step_aligned_turns(
     if monotonic:
         #logprob_dial = monotonic_partition_old(log_p_turn_z.permute(0,2,1))
         logprob_dial_doc = monotonic_partition(
-            log_p_turn_step.view(bsz*num_docs, num_steps, step_len).permute(0,2,1),
+            log_p_turn_step.view(bsz*num_docs, num_steps, x_len).permute(0,2,1),
             padding_step.view(bsz*num_docs, num_steps),
         ).view(bsz, num_docs)
         logprob_dial = logprob_dial_doc.logsumexp(-1)
