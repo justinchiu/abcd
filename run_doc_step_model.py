@@ -245,7 +245,7 @@ def evaluate(
                     predictions=best_pred[agent_turn_mask],
                     references=z_labels[agent_turn_mask]
                         if doc_pred == doc_label
-                        else [-2 for x in agent_mask if x],
+                        else [-2 for x in agent_turn_mask if x],
                         # all incorrect
                 )
 
