@@ -83,6 +83,7 @@ def run_model(
 
     # subsample docs
     (
+        sampled_doc_idxs,
         sampled_logits_qdoc_x,
         sampled_doc_ids, sampled_doc_mask,
         sampled_sent_ids, sampled_sent_mask,
@@ -160,7 +161,7 @@ def run_model(
 
     loss = neg_log_py + p_q_kl
 
-    return loss, logits_qdoc_x, log_py_doc_step
+    return loss, logits_qdoc_x, log_py_doc_step, sampled_doc_idxs
 
 
 def evaluate(
@@ -175,10 +176,9 @@ def evaluate(
     num_examples = 0
 
     doc_acc_metric = load("accuracy")
-    q_acc_metric = load("accuracy")
-    step_acc_metric = load("accuracy")
+    q_doc_acc_metric = load("accuracy")
 
-    first_monotonic_acc = load("accuracy")
+    first_monotonic_acc_metric = load("accuracy")
 
     if not args.no_save_results and split == "Valid":
         step_preds = []
@@ -193,11 +193,17 @@ def evaluate(
     #for step, batch in track(enumerate(dataloader), total=len(dataloader)):
         bsz = batch["x_ids"].shape[0]
 
-        loss, log_qdoc_x, log_pturn_doc_step = run_model(
+        loss, log_qdoc_x, log_pturn_doc_step, sampled_doc_idxs = run_model(
             batch, docs, doc_sents, doc_num_sents, encoder, model,
             num_docs=num_docs,
             monotonic=args.monotonic_train,
             decoder_turn_attention=args.decoder_turn_attention,
+        )
+
+        # compute q accuracy
+        q_doc_acc_metric.add_batch(
+            predictions=log_qdoc_x.argmax(-1),
+            references=batch["doc_labels"],
         )
 
         y_nll += loss * bsz
@@ -225,10 +231,22 @@ def evaluate(
                 best_pred_idx = scores.argmax().item()
                 best_pred = fpreds[best_pred_idx]
 
+                # compute doc accuracy
+                doc_pred = sampled_doc_idxs[i][best_pred_idx].item()
+                doc_label = batch["doc_labels"][i].item()
+                doc_acc_metric.add(
+                    prediction=doc_pred,
+                    reference=doc_label,
+                )
+                
+                # compute step accuracy
                 agent_turn_mask = batch["is_agent_turn"][i,:num_turns]
-                first_monotonic_acc.add_batch(
+                first_monotonic_acc_metric.add_batch(
                     predictions=best_pred[agent_turn_mask],
-                    references=z_labels[agent_turn_mask],
+                    references=z_labels[agent_turn_mask]
+                        if doc_pred == doc_label
+                        else [-2 for x in agent_mask if x],
+                        # all incorrect
                 )
 
                 if not args.no_save_results and split == "Valid":
@@ -239,9 +257,9 @@ def evaluate(
 
 
     avg_loss = y_nll.item() / num_examples
-    z_acc = acc_metric.compute()
-    q_z_acc = q_acc_metric.compute()
-    first_monotonic_acc = first_monotonic_acc.compute()
+    doc_acc = doc_acc_metric.compute()
+    q_doc_acc = q_doc_acc_metric.compute()
+    first_monotonic_acc = first_monotonic_acc_metric.compute()
 
     if not args.nolog:
         wandb.log(
@@ -410,7 +428,7 @@ def main():
                         )
                 encoder.train()
                 answer_model.train()
-            loss, _, _ = run_model(
+            loss, _, _, _ = run_model(
                 batch, docs, doc_sents, doc_num_sents,
                 encoder, answer_model,
                 num_docs=args.num_z_samples,

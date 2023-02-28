@@ -30,6 +30,7 @@ def subsample_docs(
         sampled_sent_ids = sent_ids[doc_idxs]
         sampled_sent_mask = sent_mask[doc_idxs]
     else:
+        doc_idxs = None
         bsz = logits_qdoc_x.shape[0]
         sampled_logits_qdoc_x = logits_qdoc_x
         sampled_doc_ids = doc_ids[None].repeat(bsz, 1, 1)
@@ -37,7 +38,7 @@ def subsample_docs(
         sampled_sent_ids = sent_ids[None].repeat(bsz, 1, 1, 1)
         sampled_sent_mask = sent_mask[None].repeat(bsz, 1, 1, 1)
     return (
-        sampled_logits_qdoc_x,
+        doc_idxs, sampled_logits_qdoc_x,
         sampled_doc_ids, sampled_doc_mask,
         sampled_sent_ids, sampled_sent_mask,
     )
