@@ -163,6 +163,7 @@ def evaluate(steps, args, model, dataloader, docs, doc_sents, doc_num_sents, spl
 
     y_nll = 0
     num_examples = 0
+
     acc_metric = load_metric("accuracy")
     agent_acc_metric = load_metric("accuracy")
     agent_filter_acc_metric = load_metric("accuracy")

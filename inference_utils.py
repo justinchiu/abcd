@@ -75,3 +75,16 @@ def first_monotonic_arg_max(unary):
     preds, score = monotonic_arg_max(unary)
     preds = first(preds.cpu().numpy())
     return preds.numpy(), score.item()
+
+def batch_monotonic_arg_max(unary):
+    N, T, Z = unary.shape
+    potentials = unary[:,:,:,None].repeat(1,1,1,Z)
+    # only one starting state
+    potentials[:,0,:,1:] = float("-inf")
+    # monotonicity constraint
+    transition = torch.tril(torch.ones(Z,Z, device=unary.device))
+    log_transition = transition.log()
+    full_potentials = potentials + log_transition
+    crf = LinearChainCRF(full_potentials)
+    binary_argmax = crf.argmax.detach().cpu()
+    return [x.nonzero()[:,2] for x in binary_argmax], crf.max.detach()

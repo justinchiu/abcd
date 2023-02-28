@@ -72,8 +72,8 @@ def score_step_aligned_turns(
         logprob_dial_doc = monotonic_partition(
             log_p_turn_step.view(bsz*num_docs, num_steps, step_len).permute(0,2,1),
             padding_step.view(bsz*num_docs, num_steps),
-        )
-        logprob_dial = logprob_dial_doc.view(bsz, num_docs).logsumexp(-1)
+        ).view(bsz, num_docs)
+        logprob_dial = logprob_dial_doc.logsumexp(-1)
     else:
         # logsumexp over steps, then sum over turns
         logprob_dial_doc = log_p_turn_z.logsumexp(2).sum(-1)
@@ -82,4 +82,4 @@ def score_step_aligned_turns(
     #turn_mask = torch.arange(x_len) <= turn_numbers[:,0,-1,None]
     #conversation_logprob = turn_logprobs.masked_fill(~turn_mask.to(device), 0).sum(-1)
     neg_log_py = -logprob_dial.mean()
-    return neg_log_py, logprob_dial_doc, log_p_turn_step
+    return neg_log_py, logprob_dial_doc, log_p_turn_step #_doc

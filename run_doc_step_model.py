@@ -35,6 +35,9 @@ from torch.distributions import Categorical
 from eba_utils import prepare_optim_and_scheduler, prepare_optim_and_scheduler2
 from subflow_args import get_args
 from model_utils import q_doc, subsample_docs, score_step_aligned_turns
+from inference_utils import (
+    first, first_monotonic_prediction, batch_monotonic_arg_max,
+)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 seed = 555
@@ -66,7 +69,6 @@ def run_model(
 
     total_num_docs, doc_len = doc_ids.shape
     bsz, x_len = x_ids.shape
-
 
     sent_len = doc_sents.input_ids.shape[-1]
     num_sents = doc_sents.input_ids.shape[0] // total_num_docs
@@ -173,23 +175,25 @@ def evaluate(
     num_examples = 0
 
     doc_acc_metric = load("accuracy")
-    doc_first_action_acc_metric = load("accuracy")
     q_acc_metric = load("accuracy")
     step_acc_metric = load("accuracy")
 
+    first_monotonic_acc = load("accuracy")
+
     if not args.no_save_results and split == "Valid":
-        q_out = []
-        p_out = []
-        doc_golds = []
+        step_preds = []
+        doc_scores = []
+        golds = []
+        dialids = []
 
     #num_docs = docs.input_ids.shape[0]
     num_docs = args.num_z_samples
     z_idxs = torch.arange(num_docs, device=device, dtype=torch.int64)
-    #for step, batch in enumerate(dataloader):
-    for step, batch in track(enumerate(dataloader), total=len(dataloader)):
+    for step, batch in enumerate(dataloader):
+    #for step, batch in track(enumerate(dataloader), total=len(dataloader)):
         bsz = batch["x_ids"].shape[0]
 
-        loss, log_qdoc_x, log_py_z, log_pturn_step_doc = run_model(
+        loss, log_qdoc_x, log_pturn_doc_step = run_model(
             batch, docs, doc_sents, doc_num_sents, encoder, model,
             num_docs=num_docs,
             monotonic=args.monotonic_train,
@@ -199,79 +203,83 @@ def evaluate(
         y_nll += loss * bsz
         num_examples += bsz
 
-        # log_py_z: bsz x num_z x time
-        cum_log_py_z = log_py_z.cumsum(-1)
-        z_hat = cum_log_py_z.argmax(1)
+        max_turns = batch["turn_ids"].shape[1]
+        ids = batch["ids"].tolist()
+        batch_z_labels = []
+        batch_z_hat = []
+        for i, id in enumerate(ids):
+            id_str = str(id)
 
-        # index into start of agent turns
-        agent_mask = batch["agent_turn_mask"]
-        agent_z_hat = z_hat[agent_mask]
+            # check against labels with sparse annotations
+            # but only the turns that are on
+            if id_str in agent_labels:
+                z_labels = torch.tensor(agent_labels[id_str])
+                z_labels = first(z_labels)
+                #num_turns = min(len(z_labels), max_turns)
+                num_turns = len(z_labels)
 
-        action_mask = batch["action_turn_mask"]
-        first_action_mask = action_mask.cumsum(1).cumsum(1) == 1
-        # take the prediction at last token if no action seen
-        first_action_mask[action_mask.sum(1) == 0, -1] = True
-        action_z_hat = z_hat[first_action_mask]
+                logp = log_pturn_doc_step[i,:,:,:num_turns]
+                preds, scores = batch_monotonic_arg_max(logp.permute(0,2,1))
+                fpreds = [first(x.cpu().numpy()) for x in preds]
 
-        num_agent_turns = agent_mask.sum(-1).tolist()
-        doc_labels = []
-        for label, num in zip(batch["doc_labels"].tolist(), num_agent_turns):
-            doc_labels += [label] * num
+                best_pred_idx = scores.argmax().item()
+                best_pred = fpreds[best_pred_idx]
 
-        acc_metric.add_batch(
-            predictions=agent_z_hat,
-            references=doc_labels,
-        )
-        first_action_acc_metric.add_batch(
-            predictions=action_z_hat,
-            references=batch["doc_labels"],
-        )
-        # hack for recall @ topk
-        q_acc_metric.add_batch(
-            predictions=(
-                log_qz_x.topk(args.num_z_samples, dim=-1).indices == batch["doc_labels"][:,None].to(device)
-            ).sum(-1) > 0,
-            references=[1 for _ in range(bsz)],
-        )
+                agent_turn_mask = batch["is_agent_turn"][i,:num_turns]
+                first_monotonic_acc.add_batch(
+                    predictions=best_pred[agent_turn_mask],
+                    references=z_labels[agent_turn_mask],
+                )
 
-        if not args.no_save_results and split == "Valid":
-            q_out.append(log_qz_x.cpu())
-            p_out.append(log_py_z.cpu())
-            doc_golds.append(batch["doc_labels"].cpu())
+                if not args.no_save_results and split == "Valid":
+                    step_preds.append(fpreds)
+                    doc_scores.append(scores)
+                    golds.append(z_labels)
+                    dialids.append(id)
+
 
     avg_loss = y_nll.item() / num_examples
     z_acc = acc_metric.compute()
-    z_first_action_acc = first_action_acc_metric.compute()
-    q_acc = q_acc_metric.compute()
+    q_z_acc = q_acc_metric.compute()
+    first_monotonic_acc = first_monotonic_acc.compute()
 
     if not args.nolog:
         wandb.log(
             {
                 "step": steps,
                 f"{split} Answer NLL": avg_loss,
-                f"{split} Subflow Acc": z_acc,
-                f"{split} Subflow First action Acc": z_first_action_acc,
-                f"{split} Q(z|x) Recall @ {args.num_z_samples}": q_acc,
+                f"{split} All Step Acc": z_acc,
+                f"{split} Q Acc": q_z_acc,
+                f"{split} First monotonic Step Acc": first_monotonic_acc,
             }
         )
     if not args.no_save_results and split == "Valid":
         torch.save(
             (
-                q_out,
-                p_out,
-                doc_golds,
+                step_preds,
+                doc_scores,
+                golds,
+                dialids,
             ),
             f"logging/{args.run_name}|step-{steps}.pt",
         )
 
-    print("avg los")
+    print("average loss")
     print(avg_loss)
     print("z acc")
     print(z_acc)
-    print("z first action acc")
-    print(z_first_action_acc)
-    print(f"q(z|x) recall@{args.num_z_samples}")
-    print(q_acc)
+    print("agent z acc")
+    print(agent_z_acc)
+    print("agent filter acc")
+    print(agent_f_acc)
+    print("monotonic acc")
+    print(monotonic_acc)
+    print("first monotonic acc")
+    print(first_monotonic_acc)
+    print("argmax acc")
+    print(argmax_acc)
+    print("first argmax acc")
+    print(first_argmax_acc)
 
     return avg_loss
 
@@ -283,7 +291,7 @@ def main():
     encoder_name = args.model_dir.split("/")[-1]
     answer_model_name = args.answer_model_dir.split("/")[-1]
     run_name = (
-        f"doc-step-model-{args.prefix}-{encoder_name}-{answer_model_name} "
+        f"doc-step-{args.prefix}-{encoder_name}-{answer_model_name} "
         f"lr-{args.learning_rate} "
         f"bs-{args.batch_size*args.gradient_accumulation_steps} "
         f"dt-{args.num_dialogue_turns} "
