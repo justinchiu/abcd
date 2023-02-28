@@ -266,8 +266,8 @@ def evaluate(
             {
                 "step": steps,
                 f"{split} Answer NLL": avg_loss,
-                f"{split} All Step Acc": z_acc,
-                f"{split} Q Acc": q_z_acc,
+                f"{split} Doc Acc": doc_acc,
+                f"{split} Q Doc Acc": q_doc_acc,
                 f"{split} First monotonic Step Acc": first_monotonic_acc,
             }
         )
@@ -284,20 +284,12 @@ def evaluate(
 
     print("average loss")
     print(avg_loss)
-    print("z acc")
-    print(z_acc)
-    print("agent z acc")
-    print(agent_z_acc)
-    print("agent filter acc")
-    print(agent_f_acc)
-    print("monotonic acc")
-    print(monotonic_acc)
+    print("doc acc")
+    print(doc_acc)
+    print("q doc acc")
+    print(q_doc_acc)
     print("first monotonic acc")
     print(first_monotonic_acc)
-    print("argmax acc")
-    print(argmax_acc)
-    print("first argmax acc")
-    print(first_argmax_acc)
 
     return avg_loss
 
