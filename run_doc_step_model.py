@@ -141,7 +141,7 @@ def run_model(
         ~x_mask.bool()[:, None, None].expand(bsz, num_docs, num_sents, T),
         0,
     )
-    neg_log_py = score_step_aligned_turns(
+    neg_log_py, log_py_doc, log_py_doc_step = score_step_aligned_turns(
         tok_loss, turn_numbers,
         sampled_sent_mask, doc_labels, device, monotonic,
     )
@@ -153,12 +153,12 @@ def run_model(
     approx_log_qdoc_x = sampled_logits_qdoc_x.log_softmax(-1)
     p_q_kl = kl_divergence(
         Categorical(logits=approx_log_pdoc_x),
-        Categorical(logits=approx_log_qdoc_x)
+        Categorical(logits=approx_log_qdoc_x),
     ).mean()
 
     loss = neg_log_py + p_q_kl
 
-    return loss, logits_qdoc_x, tok_loss
+    return loss, logits_qdoc_x, log_py_doc_step
 
 
 def evaluate(
@@ -182,7 +182,8 @@ def evaluate(
         p_out = []
         doc_golds = []
 
-    num_docs = docs.input_ids.shape[0]
+    #num_docs = docs.input_ids.shape[0]
+    num_docs = args.num_z_samples
     z_idxs = torch.arange(num_docs, device=device, dtype=torch.int64)
     #for step, batch in enumerate(dataloader):
     for step, batch in track(enumerate(dataloader), total=len(dataloader)):

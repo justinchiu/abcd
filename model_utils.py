@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 from inference_utils import monotonic_partition
 
@@ -57,26 +58,28 @@ def score_step_aligned_turns(
     log_p_turn_given_z = torch.scatter_add(loss_buffer, -1, turn_numbers.to(device), tok_loss)
 
     # padding steps will only have <bos> <eos>, so mask will only have two elements.
-    padding_z = sent_mask.sum(-1) <= 2
-    #padding_z = sent_mask[doc_labels].sum(-1) <= 2
-    log_p_z = torch.zeros(bsz, num_docs, num_steps, device=device)
-    #log_p_z[padding_z] = -1e5
-    log_p_z[padding_z] = float("-inf")
-    log_p_z = log_p_z.log_softmax(-1)
+    padding_step = sent_mask.sum(-1) <= 2
+    log_p_step = torch.zeros(bsz, num_docs, num_steps, device=device)
+    log_p_step[padding_step] = float("-inf")
+    log_p_step = log_p_step.log_softmax(-1)
 
-    log_p_turn_z = log_p_turn_given_z + log_p_z[:,:,:,None]
+    log_p_doc = -np.log(num_docs)
+
+    log_p_turn_step = log_p_turn_given_z + log_p_step[:,:,:,None] + log_p_doc
 
     if monotonic:
         #logprob_dial = monotonic_partition_old(log_p_turn_z.permute(0,2,1))
-        logprob_dial = monotonic_partition(
-            log_p_turn_given_z.view(bsz*num_docs, num_steps, step_len).permute(0,2,1),
-            padding_z.view(bsz*num_docs, num_steps),
+        logprob_dial_doc = monotonic_partition(
+            log_p_turn_step.view(bsz*num_docs, num_steps, step_len).permute(0,2,1),
+            padding_step.view(bsz*num_docs, num_steps),
         )
+        logprob_dial = logprob_dial_doc.view(bsz, num_docs).logsumexp(-1)
     else:
-        turn_logprobs = log_p_turn_z.logsumexp(2).logsumexp(1)
-        logprob_dial = turn_logprobs.sum(-1)
+        # logsumexp over steps, then sum over turns
+        logprob_dial_doc = log_p_turn_z.logsumexp(2).sum(-1)
+        logprob_dial = logprob_dial_doc.logsumexp(1)
 
     #turn_mask = torch.arange(x_len) <= turn_numbers[:,0,-1,None]
     #conversation_logprob = turn_logprobs.masked_fill(~turn_mask.to(device), 0).sum(-1)
     neg_log_py = -logprob_dial.mean()
-    return neg_log_py
+    return neg_log_py, logprob_dial_doc, log_p_turn_step
