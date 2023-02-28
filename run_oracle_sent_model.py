@@ -82,6 +82,7 @@ def run_model(
     input_ids = sent_ids[doc_labels].view(bsz * num_z, z_len)
     inputs_embeds = model.model.decoder.embed_tokens(input_ids) * model.model.decoder.embed_scale
     attention_mask = sent_mask[doc_labels].view(bsz * num_z, z_len)
+
     decoder_causal_attention_mask = model.model.decoder._prepare_decoder_attention_mask(
         None, labels.shape, inputs_embeds, 0,
     )
