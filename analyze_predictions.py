@@ -150,8 +150,14 @@ def oracle_sent_info_analyze():
 
     import pdb; pdb.set_trace()
 
+def doc_sent_bad_analyze():
+    path = "logging/doc-step-228-roberta-base-bart-base lr-1e-05 bs-16 dt-0 ds-0 ml-256 k-4 ip-True mt-True dta-True |step-1000.pt"
+    preds, doc_scores, labels, ids = torch.load(path, map_location=torch.device("cpu"))
+    import pdb; pdb.set_trace()
+
 
 if __name__ == "__main__":
     #star_all_ws_analyze()
     #oracle_sent_analyze()
-    oracle_sent_info_analyze()
+    #oracle_sent_info_analyze()
+    doc_sent_bad_analyze()

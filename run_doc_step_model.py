@@ -77,7 +77,8 @@ def run_model(
     sent_mask = doc_sents.attention_mask.view(total_num_docs, -1, sent_len)
 
     # encoder and log q(z|x)
-    logits_qdoc_x, neg_log_qdoc = q_doc(encoder, x_ids, x_mask, doc_ids, doc_mask, doc_labels)
+    with torch.no_grad():
+        logits_qdoc_x, neg_log_qdoc = q_doc(encoder, x_ids, x_mask, doc_ids, doc_mask, doc_labels)
 
     # answer log p(y|x,z)
 
@@ -183,6 +184,7 @@ def evaluate(
     if not args.no_save_results and split == "Valid":
         step_preds = []
         doc_scores = []
+        doc_idxs = []
         golds = []
         dialids = []
 
@@ -252,6 +254,7 @@ def evaluate(
                 if not args.no_save_results and split == "Valid":
                     step_preds.append(fpreds)
                     doc_scores.append(scores)
+                    doc_idxs.append(sampled_doc_idxs)
                     golds.append(z_labels)
                     dialids.append(id)
 
@@ -276,6 +279,7 @@ def evaluate(
             (
                 step_preds,
                 doc_scores,
+                doc_idxs,
                 golds,
                 dialids,
             ),
