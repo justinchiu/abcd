@@ -39,7 +39,7 @@ def get_guidelines(guidelines):
             })
     return docs
 
-def load_or_make_dataset():
+def get_dataset():
     with Path("data/guidelines.json").open("r") as f:
         guidelines = json.load(f)
         docs = get_guidelines(guidelines)
@@ -83,7 +83,7 @@ def main():
         doc_embeddings = datasets.load_from_disk(data_path)
     else:
         print("WARNING: rerunning embedding")
-        dataset = load_or_make_dataset()
+        dataset = get_dataset()
         doc_embeddings = dataset.map(embed, batch_size=BATCH_SIZE, batched=True)
         doc_embeddings.save_to_disk(data_path)
     doc_embeddings.add_faiss_index("embeddings")
