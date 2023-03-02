@@ -48,9 +48,11 @@ def get_align(
 
     all_preds = []
     agent_preds = []
+    doc_preds = []
     # true
     true_labels = []
     agent_true_labels = []
+    true_docs = []
 
     for e in val_dataset:
         xs = e["xs"]
@@ -86,6 +88,9 @@ def get_align(
         best_doc = sorted_docs[best_doc_idx]
         unary = turn_unaries[best_doc_idx]
 
+        doc_preds.append(best_doc)
+        true_docs.append(doc_idx)
+
         agent_mask = np.array([s == "agent" for s,_ in e["turns"]])
 
         this_true_labels = labels[agent_mask]
@@ -109,6 +114,8 @@ def get_align(
     print(accscore(true_labels, all_preds))
     print(f"agent preds {name}")
     print(accscore(true_labels, agent_preds))
+    print(f"doc {name}")
+    print(accscore(true_docs, doc_preds))
 
     """
     savepath = f"logging/oracle-sent-{name}.pt"
@@ -146,6 +153,6 @@ for k in [1, 2, 3, 4, 5, 10, 25, 55]:
     print(k)
     get_align(
         lexical_doc_score_fn, lexical_score_fn, first_monotonic_arg_max,
-        name="lexical-first-mono",
+        name=f"lexical-first-mono={k}",
         k=k,
     )
