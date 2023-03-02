@@ -130,9 +130,7 @@ Return the answer only with JSON (no text) in the format [{{"T": turn, "S": step
     with start_chain(LOG_NAME) as backend:
         #prompt = KnnPrompt(backend.OpenAIEmbed()).chain(AlignmentPrompt(backend.OpenAI()))
         knnprompt = KnnPrompt(backend.OpenAIEmbed())
-        mybackend = backend.OpenAI()
-        mybackend.options["max_tokens"] = 512
-        prompt = AlignmentPrompt(mybackend)
+        prompt = AlignmentPrompt(backend.OpenAI(max_tokens=512))
 
         doc_acc = evaluate.load("accuracy")
         step_acc = evaluate.load("accuracy")
