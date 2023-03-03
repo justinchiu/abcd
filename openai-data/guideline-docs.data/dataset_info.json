@@ -1,0 +1,23 @@
+{
+  "citation": "",
+  "description": "",
+  "features": {
+    "doc": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "title": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "embeddings": {
+      "feature": {
+        "dtype": "float64",
+        "_type": "Value"
+      },
+      "_type": "Sequence"
+    }
+  },
+  "homepage": "",
+  "license": ""
+}

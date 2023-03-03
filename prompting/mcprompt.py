@@ -134,7 +134,8 @@ Return the answer only with JSON (no text) in the format [{{"T": turn, "S": step
 
         doc_acc = evaluate.load("accuracy")
         step_acc = evaluate.load("accuracy")
-        for x in track(dialogues):
+        #for x in track(dialogues):
+        for x in dialogues:
             id = x["id"]
             dial = x["dialogue"]
             true_doc = x["doc"]
@@ -165,6 +166,7 @@ Return the answer only with JSON (no text) in the format [{{"T": turn, "S": step
                 predictions=steppred[agent_mask],
                 references=true_labels[agent_mask],
             )
+            import pdb; pdb.set_trace()
 
 
         docacc = doc_acc.compute()
