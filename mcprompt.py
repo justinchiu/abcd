@@ -8,6 +8,14 @@ import json
 from typing import Any
 from rich.progress import track
 
+from jinja2 import (
+    Environment,
+    FileSystemLoader,
+    PackageLoader,
+    Template,
+    select_autoescape,
+)
+
 import openai
 from minichain import Prompt, EmbeddingPrompt, TemplatePrompt, show_log, start_chain
 
@@ -100,9 +108,26 @@ def main():
                 "scores": res.scores,
             }
 
-    class AlignmentPrompt(Prompt[str, Any]):
-        def prompt(self, input: str) -> str:
-            return input
+    class AlignmentPrompt(TemplatePrompt):
+        #template_file = "prompting/align.pmpt.tpl"
+        #template_file = "prompting/zeroshotalign.pmpt.tpl"
+        template_file = "prompting/original.pmpt.tpl"
+
+        def dbg_render_prompt(self, kwargs):
+            if self.template_file:
+                tmp = Environment(loader=FileSystemLoader(".")).get_template(
+                    name=self.template_file
+                )
+            elif self.template:
+                tmp = self.template  # type: ignore
+            else:
+                tmp = Template(self.prompt_template)
+            if isinstance(kwargs, dict):
+                x = tmp.render(**kwargs)
+            else:
+                x = tmp.render(**asdict(kwargs))
+            return x
+
 
         def parse(self, out: str, input) -> Any:
             # Encode the parsing logic
@@ -115,22 +140,10 @@ def main():
                 preds[turn] = step
             return preds
 
-    def prepare_prompt(dialogue, doc):
-        # Encode prompting logic. Had to pull this out from prompt class.
-        return f"""Manual
-{doc}
-Dialogue
-{dialogue}
-
-Please align each turn in this dialogue to a step in the manual above.
-Return the answer only with JSON (no text) in the format [{{"T": turn, "S": step}}].
-
-"""
-
     with start_chain(LOG_NAME) as backend:
         #prompt = KnnPrompt(backend.OpenAIEmbed()).chain(AlignmentPrompt(backend.OpenAI()))
         knnprompt = KnnPrompt(backend.OpenAIEmbed())
-        prompt = AlignmentPrompt(backend.OpenAI(max_tokens=512))
+        prompt = AlignmentPrompt(backend.OpenAI(model="text-davinci-003",max_tokens=1024))
 
         doc_acc = evaluate.load("accuracy")
         step_acc = evaluate.load("accuracy")
@@ -152,7 +165,10 @@ Return the answer only with JSON (no text) in the format [{{"T": turn, "S": step
 
             true_labels = first(np.array(labels[id], dtype=int))
 
-            result = prompt(prepare_prompt(dial, doc))
+            out = prompt.dbg_render_prompt(dict(dial=dial, doc=doc))
+            print(out)
+            #import pdb; pdb.set_trace()
+            result = prompt(dict(dial=dial, doc=doc))
             bi_result = np.copy(result)
             bi_result[1:][bi_result[1:] == bi_result[:-1]] = -1
 
@@ -166,8 +182,6 @@ Return the answer only with JSON (no text) in the format [{{"T": turn, "S": step
                 predictions=steppred[agent_mask],
                 references=true_labels[agent_mask],
             )
-            import pdb; pdb.set_trace()
-
 
         docacc = doc_acc.compute()
         stepacc = step_acc.compute()
