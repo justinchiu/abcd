@@ -21,12 +21,12 @@ from minichain import Prompt, EmbeddingPrompt, TemplatePrompt, show_log, start_c
 
 from utils.manual_map import subflow_map
 from inference_utils import first
-
 from prompting.utils import get_dataset, embed, get_dialogues_and_labels
 
 BATCH_SIZE = 128
-EMBEDDING_MODEL = "text-embedding-ada-002"
-LOG_NAME = "prompting"
+LOG_NAME = "prompting2"
+K = 5
+
 
 def main():
     data_path = Path("openai-data/guideline-docs.data")
@@ -42,18 +42,31 @@ def main():
     dialogues, labels = get_dialogues_and_labels()
 
     class KnnPrompt(EmbeddingPrompt):
-        def find(self, out, input):
-            res = doc_embeddings.get_nearest_examples("embeddings", np.array(out), 5)
-            return {
-                "query": input,
-                "docs": res.examples["doc"],
-                "titles": res.examples["title"],
-                "scores": res.scores,
-            }
+        """
+        Looks up k-nearest neighbors for query
+        """
+        def parse(self, out, input):
+            dataset, k = self.data
+            query_embedding = np.array(out)        
+            res = dataset.get_nearest_examples("embeddings", query_embedding, k)
+            return [
+                dict(
+                    doc=doc,
+                    title=title,
+                    dial=input,
+                    score=score,
+                )
+                for doc, title, score in zip(
+                    res.examples["doc"], res.examples["title"], res.scores,
+                )
+            ]
 
     class AlignmentPrompt(TemplatePrompt):
+        # doesn't work
         #template_file = "prompting/align.pmpt.tpl"
+        # works the same as original prompt but more expensive
         #template_file = "prompting/zeroshotalign.pmpt.tpl"
+        # works pretty well
         template_file = "prompting/original.pmpt.tpl"
 
         def dbg_render_prompt(self, kwargs):
@@ -81,12 +94,15 @@ def main():
                 turn = x["T"]
                 step = x["S"]
                 preds[turn] = step
-            return preds
+            input["alignment"] = preds
+            return input
 
     with start_chain(LOG_NAME) as backend:
         #prompt = KnnPrompt(backend.OpenAIEmbed()).chain(AlignmentPrompt(backend.OpenAI()))
-        knnprompt = KnnPrompt(backend.OpenAIEmbed())
-        prompt = AlignmentPrompt(backend.OpenAI(model="text-davinci-003",max_tokens=1024))
+        knnprompt = KnnPrompt(backend.OpenAIEmbed(), (doc_embeddings, K))
+        prompt = AlignmentPrompt(backend.OpenAI(model="text-davinci-003",max_tokens=512))
+
+        chainprompt = knnprompt.chain(prompt.map())
 
         doc_acc = evaluate.load("accuracy")
         step_acc = evaluate.load("accuracy")
@@ -97,23 +113,24 @@ def main():
             true_doc = x["doc"]
             speakers = x["speakers"]
 
-            knnresult = knnprompt(dial)
+            true_labels = first(np.array(labels[id], dtype=int))
 
+
+            knnresult = knnprompt(dial)
             docpreds = knnresult["titles"]
             docs = knnresult["docs"]
             scores = knnresult["scores"]
-
             docpred = docpreds[0]
             doc = docs[0]
-
-            true_labels = first(np.array(labels[id], dtype=int))
-
             out = prompt.dbg_render_prompt(dict(dial=dial, doc=doc))
             print(out)
             #import pdb; pdb.set_trace()
             result = prompt(dict(dial=dial, doc=doc))
             bi_result = np.copy(result)
             bi_result[1:][bi_result[1:] == bi_result[:-1]] = -1
+
+            result = chainprompt(dial)
+            import pdb; pdb.set_trace()
 
             wrong_result = np.full(bi_result.shape, -2)
 
@@ -125,6 +142,7 @@ def main():
                 predictions=steppred[agent_mask],
                 references=true_labels[agent_mask],
             )
+            import pdb; pdb.set_trace()
 
         docacc = doc_acc.compute()
         stepacc = step_acc.compute()
