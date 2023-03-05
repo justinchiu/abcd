@@ -21,7 +21,7 @@ from minichain import Prompt, EmbeddingPrompt, TemplatePrompt, show_log, start_c
 
 from utils.manual_map import subflow_map
 from inference_utils import first
-from prompting.utils import get_dataset, embed, get_dialogues_and_labels
+from prompting_utils import get_dataset, embed, get_dialogues_and_labels
 
 BATCH_SIZE = 128
 LOG_NAME = "prompting2"
@@ -115,22 +115,13 @@ def main():
 
             true_labels = first(np.array(labels[id], dtype=int))
 
+            result = chainprompt(dial)
+            import pdb; pdb.set_trace()
 
-            knnresult = knnprompt(dial)
-            docpreds = knnresult["titles"]
-            docs = knnresult["docs"]
-            scores = knnresult["scores"]
-            docpred = docpreds[0]
-            doc = docs[0]
-            out = prompt.dbg_render_prompt(dict(dial=dial, doc=doc))
-            print(out)
-            #import pdb; pdb.set_trace()
-            result = prompt(dict(dial=dial, doc=doc))
+
             bi_result = np.copy(result)
             bi_result[1:][bi_result[1:] == bi_result[:-1]] = -1
 
-            result = chainprompt(dial)
-            import pdb; pdb.set_trace()
 
             wrong_result = np.full(bi_result.shape, -2)
 

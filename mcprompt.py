@@ -22,7 +22,7 @@ from minichain import Prompt, EmbeddingPrompt, TemplatePrompt, show_log, start_c
 from utils.manual_map import subflow_map
 from inference_utils import first
 
-from prompting.utils import get_dataset, embed, get_dialogues_and_labels
+from prompting_utils import get_dataset, embed, get_dialogues_and_labels
 
 BATCH_SIZE = 128
 EMBEDDING_MODEL = "text-embedding-ada-002"
