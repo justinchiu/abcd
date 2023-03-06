@@ -29,7 +29,6 @@ EMBEDDING_MODEL = "text-embedding-ada-002"
 LOG_NAME = "prompting"
 
 USE_CHAT = False
-
 MODEL = "gpt-3.5-turbo" if USE_CHAT else "text-davinci-003"
 
 def main():

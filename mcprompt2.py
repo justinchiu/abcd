@@ -24,8 +24,9 @@ from prompting_utils import get_dataset, embed, get_dialogues_and_labels
 
 BATCH_SIZE = 128
 LOG_NAME = "prompting2"
-MODEL = "gpt-3.5-turbo"
 K = 3
+USE_CHAT = False
+MODEL = "gpt-3.5-turbo" if USE_CHAT else "text-davinci-003"
 
 
 def main():
@@ -55,7 +56,7 @@ def main():
                     doc=doc,
                     title=title,
                     dial=input,
-                    score=score,
+                    doc_score=score,
                     steps=steps,
                 )
                 for doc, title, steps, score in zip(
@@ -110,16 +111,18 @@ def main():
             return json.loads(out)["D"]
 
     with start_chain(LOG_NAME) as backend:
+        completion_backend = backend.OpenAIChat if USE_CHAT else backend.OpenAI
+
         #prompt = KnnPrompt(backend.OpenAIEmbed()).chain(AlignmentPrompt(backend.OpenAI()))
         knnprompt = KnnPrompt(backend.OpenAIEmbed(), (doc_embeddings, K))
-        prompt = AlignmentPrompt(backend.OpenAI(model=MODEL,max_tokens=1024))
+        prompt = AlignmentPrompt(completion_backend(model=MODEL,max_tokens=1024))
         chainprompt = knnprompt.chain(prompt.map())
-        docsprompt = DocsPrompt(backend.OpenAI(model=MODEL,max_tokens=5))
+        docsprompt = DocsPrompt(completion_backend(model=MODEL,max_tokens=32))
 
         doc_acc = evaluate.load("accuracy")
         step_acc = evaluate.load("accuracy")
-        for x in track(dialogues):
-        #for x in dialogues:
+        #for x in track(dialogues):
+        for x in dialogues:
             id = x["id"]
             dial = x["dialogue"]
             true_doc = x["doc"]
@@ -133,32 +136,37 @@ def main():
             for i,result in enumerate(results):
                 if len(result["alignment"]) != len(turns):
                     del results[i]
+            filtered_results = [
+                r for r in results if len(r["alignment"]) == len(turns)
+            ]
 
-            alignments = np.stack([x["alignment"] for x in results])
+            alignments = np.stack([x["alignment"] for x in filtered_results])
             alignments_b = np.copy(alignments)
             alignments_b[:,1:][alignments[:,1:] == alignments[:,:-1]] = -1
-            scores = [x["score"] for x in results]
-            titles = [x["title"] for x in results]
-            stepss = [x["steps"] for x in results]
+            doc_scores = [x["doc_score"] for x in filtered_results]
+            titles = [x["title"] for x in filtered_results]
+            stepss = [x["steps"] for x in filtered_results]
 
             # doc selection prompt
             docprompt = []
-            for result in results:
+            for result in filtered_results:
                 steps = result["steps"]
                 alignment = np.copy(result["alignment"])
-                #alignment[1:][alignment[1:] == alignment[:-1]] = -1
+                alignment[1:][alignment[1:] == alignment[:-1]] = -1
 
                 strbuilder = []
                 for turn, stepidx in zip(turns, alignment):
                     if stepidx != -1 and stepidx < len(steps):
+                        # Only take turns that are aligned to steps (beginning)
                         strbuilder.append(f"{steps[stepidx]} => {turn}")
-                    else:
-                        strbuilder.append(turn)
                 docprompt.append("\n".join(strbuilder))
 
             docspromptstring = "\n\n".join([f"Document {i}\n{x}" for i,x in enumerate(docprompt)])
-            instruction = "Which document has the best rationales? Rationale => turn. Give your answer as JSON {\"D\": number}.\n\n"
-            bestidx = docsprompt(instruction + docspromptstring + "\nAnswer:")
+            instruction = """\
+Which document has the best rationales? Rationale => turn. Give your answer as JSON (no text) {\"D\": document number}.
+Answer: 
+"""
+            bestidx = docsprompt(docspromptstring + instruction)
 
             alignment = alignments_b[bestidx]
             docpred = titles[bestidx]
@@ -177,7 +185,9 @@ def main():
 
         docacc = doc_acc.compute()
         stepacc = step_acc.compute()
+        print("document accuracy")
         print(docacc)
+        print("step accuracy")
         print(stepacc)
 
     #show_log(LOG_NAME)
