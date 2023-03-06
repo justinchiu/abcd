@@ -8,6 +8,10 @@ import json
 from typing import Any
 from rich.progress import track
 
+import openai
+
+from utils.manual_map import subflow_map
+
 
 EMBEDDING_MODEL = "text-embedding-ada-002"
 
@@ -29,6 +33,7 @@ def get_guidelines(guidelines):
             docs.append({
                 "doc": "\n".join(numbered_steps),
                 "title": subflow,
+                "steps": strings,
             })
     return docs
 
@@ -58,7 +63,8 @@ def get_dialogues_and_labels():
             "id": str(x["convo_id"]),
             "dialogue": get_dialogue(x["original"]),
             "doc": subflow_map[x["scenario"]["subflow"]],
-            "speakers": get_speakers(x["original"]),
+            "speakers": [speaker for speaker, turn in x["original"]],
+            "turns": [f"{speaker}: {turn}" for speaker, turn in x["original"]],
         }
         for x in data
         if str(x["convo_id"]) in agent_labels

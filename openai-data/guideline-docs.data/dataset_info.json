@@ -10,6 +10,13 @@
       "dtype": "string",
       "_type": "Value"
     },
+    "steps": {
+      "feature": {
+        "dtype": "string",
+        "_type": "Value"
+      },
+      "_type": "Sequence"
+    },
     "embeddings": {
       "feature": {
         "dtype": "float64",
