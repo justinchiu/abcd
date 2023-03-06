@@ -26,6 +26,7 @@ from prompting_utils import get_dataset, embed, get_dialogues_and_labels
 
 BATCH_SIZE = 128
 EMBEDDING_MODEL = "text-embedding-ada-002"
+MODEL = "gpt-3.5-turbo"
 LOG_NAME = "prompting"
 
 def main():
@@ -86,7 +87,7 @@ def main():
     with start_chain(LOG_NAME) as backend:
         #prompt = KnnPrompt(backend.OpenAIEmbed()).chain(AlignmentPrompt(backend.OpenAI()))
         knnprompt = KnnPrompt(backend.OpenAIEmbed())
-        prompt = AlignmentPrompt(backend.OpenAI(model="text-davinci-003",max_tokens=1024))
+        prompt = AlignmentPrompt(backend.OpenAI(model=MODEL,max_tokens=1024))
 
         doc_acc = evaluate.load("accuracy")
         step_acc = evaluate.load("accuracy")
