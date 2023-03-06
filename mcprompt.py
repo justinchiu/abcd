@@ -26,8 +26,11 @@ from prompting_utils import get_dataset, embed, get_dialogues_and_labels
 
 BATCH_SIZE = 128
 EMBEDDING_MODEL = "text-embedding-ada-002"
-MODEL = "gpt-3.5-turbo"
 LOG_NAME = "prompting"
+
+USE_CHAT = False
+
+MODEL = "gpt-3.5-turbo" if USE_CHAT else "text-davinci-003"
 
 def main():
     data_path = Path("openai-data/guideline-docs.data")
@@ -81,13 +84,15 @@ def main():
             for x in jsout:
                 turn = x["T"]
                 step = x["S"]
+                #preds[turn] = step if step != "N/A" else -1
                 preds[turn] = step
             return preds
 
     with start_chain(LOG_NAME) as backend:
         #prompt = KnnPrompt(backend.OpenAIEmbed()).chain(AlignmentPrompt(backend.OpenAI()))
         knnprompt = KnnPrompt(backend.OpenAIEmbed())
-        prompt = AlignmentPrompt(backend.OpenAI(model=MODEL,max_tokens=1024))
+        completion_backend = backend.OpenAIChat if USE_CHAT else backend.OpenAI
+        prompt = AlignmentPrompt(completion_backend(model=MODEL,max_tokens=1024))
 
         doc_acc = evaluate.load("accuracy")
         step_acc = evaluate.load("accuracy")
