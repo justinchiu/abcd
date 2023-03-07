@@ -35,22 +35,24 @@ MODEL = "gpt-3.5-turbo" if USE_CHAT else "text-davinci-003"
 dataset_choices = ["abcd", "flodial", "sgd"]
 DATASET = dataset_choices[1]
 
-dataset_obj = None
-data_path = None
-if DATASET == "abcd":
-    dataset_obj = Abcd()
-    data_path = Path("openai-data/guideline-docs.data")
-elif DATASET == "flodial":
-    dataset_obj = FloDial()
-    data_path = Path("openai-data/flodial-guideline-docs.data")
-else:
-    raise NotImplementedErro(f"Unimplemented dataset {DATASET}")
-
-get_dataset = dataset_obj.get_dataset
-get_dialogues_and_labels = dataset_obj.get_dialogues_and_labels
-
 
 def main():
+    dataset_obj = None
+    data_path = None
+    if DATASET == "abcd":
+        dataset_obj = Abcd()
+        data_path = Path("openai-data/guideline-docs.data")
+    elif DATASET == "flodial":
+        dataset_obj = FloDial()
+        data_path = Path("openai-data/flodial-guideline-docs.data")
+    else:
+        raise NotImplementedErro(f"Unimplemented dataset {DATASET}")
+
+    print(f"RUNNING GPT ON DATASET {DATASET}")
+
+    get_dataset = dataset_obj.get_dataset
+    get_dialogues_and_labels = dataset_obj.get_dialogues_and_labels
+
     if data_path.exists():
         print(f"Loading embedding from {data_path}")
         doc_embeddings = datasets.load_from_disk(data_path)
