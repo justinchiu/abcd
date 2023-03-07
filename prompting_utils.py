@@ -11,143 +11,7 @@ from rank_bm25 import BM25Okapi
 
 import openai
 
-from utils.manual_map import subflow_map
-
-
 EMBEDDING_MODEL = "text-embedding-ada-002"
-
-class Abcd:
-    def get_guidelines(self, guidelines):
-        docs = []
-        for flow, subflow_dict in guidelines.items():
-            for subflow, content in subflow_dict["subflows"].items():
-                actions = content["actions"]
-                strings = [content["instructions"][0]]
-                for step in actions:
-                    stepstring = step["text"] + " ".join(step["subtext"])
-                    strings.append(stepstring)
-                strings.append(content["instructions"][1])
-                numbered_steps = [
-                    f"Step {i}: {x}"
-                    for i, x in enumerate(strings)
-                ]
-                docs.append({
-                    "doc": "\n".join(numbered_steps),
-                    "title": subflow,
-                    "steps": strings,
-                })
-        return docs
-
-    def get_docs(self):
-        with Path("data/guidelines.json").open("r") as f:
-            guidelines = json.load(f)
-            docs = self.get_guidelines(guidelines)
-            return Dataset.from_list(docs)
-
-    def get_dialogue(self, dial):
-        return "\n".join([
-            f"Turn {i} {speaker}: {turn}"
-            for i, (speaker, turn) in enumerate(dial)
-        ])
-
-    def get_speakers(self, dial):
-        return [speaker for speaker, turn in dial]
-
-    def get_dialogues_and_labels(self):
-        with Path("data/agent_step_annotations.json").open("r") as f:
-            agent_labels = json.load(f)["dev"]
-        with Path("data/abcd_v1.2.json").open("r") as f:
-            data = json.load(f)["dev"]
-        return [
-            {
-                "id": str(x["convo_id"]),
-                "dialogue": self.get_dialogue(x["original"]),
-                "doc": subflow_map[x["scenario"]["subflow"]],
-                "speakers": [speaker for speaker, turn in x["original"]],
-                "turns": [f"{speaker}: {turn}" for speaker, turn in x["original"]],
-            }
-            for x in data
-            if str(x["convo_id"]) in agent_labels
-        ], agent_labels
-
-
-class FloDial:
-    def get_docs(self):
-        dir = Path("FloDial-dataset/knowledge-sources")
-        docs = []
-        for path in dir.iterdir():
-            with path.open("r") as f:
-                doc = json.load(f)
-                # WARNING: MIGHT BE NON-CONTIGUOUS FLOWS
-                # eg they are MISSING numbers...
-                flow = [doc["problem_description"]] + [
-                    #doc["nodes"][key]["label"]
-                    doc["nodes"][key]["utterance"]
-                    for key in sorted(doc["nodes"], key=lambda x: int(x))
-                ]
-                faqs = [f"{x['q']} {x['a']}" for x in doc["supporting_faqs"]]
-                numbered_steps = [
-                    f"Step {i}: {x}"
-                    for i, x in enumerate(flow)
-                ]
-                docs.append({
-                    "doc": "\n".join(numbered_steps),
-                    "title": doc["name"],
-                    "steps": flow,
-                    "nodes": flow,
-                    #"edges": ,
-                    "faqs": faqs, # noise
-                })
-        return Dataset.from_list(docs)
-
-    def get_dialogue(self, dial):
-        return "\n".join([
-            f"Turn {i} {turn['speaker']}: {turn['utterance']}"
-            for i, turn in enumerate(dial)
-        ])
-
-    def get_label(self, turn):
-        key = "grounded_doc_id"
-        if key not in turn:
-            return -1
-
-        value = turn[key]
-        source, idx = value.split("-")
-        return int(idx) if source == "chart" else -1
-
-
-    def get_dialogues_and_labels(self):
-        with Path("FloDial-dataset/dialogs/s-flo.json").open("r") as f:
-            data_split = json.load(f)
-        with Path("FloDial-dataset/dialogs/dialogs.json").open("r") as f:
-            dialogs = json.load(f)
-
-        def add_key(d, k, v):
-            d[k] = v
-            return d
-
-        train_dialogs = [add_key(dialogs[i], "id", i) for i in data_split["trn"]]
-        valid_dialogs = [add_key(dialogs[i], "id", i) for i in data_split["val"]]
-
-        dial_key = "utterences"
-
-        agent_labels = {
-            id: [self.get_label(turn) for turn in dial[dial_key]]
-            for id, dial in dialogs.items()
-        }
-
-        return [
-            {
-                "id": str(dial["id"]),
-                "dialogue": self.get_dialogue(dial[dial_key]),
-                "doc": dial["flowchart"],
-                "speakers": [turn["speaker"] for turn in dial[dial_key]],
-                "turns": [f"{turn['speaker']}: {turn['utterance']}" for turn in dial[dial_key]],
-            }
-            for dial in valid_dialogs
-        ], agent_labels
-
-# / DATA
 
 def embed(x):
     emb = openai.Embedding.create(input=x["doc"], engine=EMBEDDING_MODEL)
@@ -161,21 +25,77 @@ def get_bm25(docs):
     bm25s = [BM25Okapi([step.lower().split() for step in doc["steps"]]) for doc in docs]
     return bm25d, bm25s
 
+class KnnPrompt(EmbeddingPrompt):
+    def find(self, out, input):
+        dataset, k = self.data
+        res = dataset.get_nearest_examples("embeddings", np.array(out), k)
+        return {
+            "query": input,
+            "docs": res.examples["doc"],
+            "titles": res.examples["title"],
+            "steps": res.examples["steps"],
+            "scores": res.scores,
+        }
+
+class AlignmentPrompt(TemplatePrompt):
+    #template_file = "prompting/align.pmpt.tpl"
+    #template_file = "prompting/zeroshotalign.pmpt.tpl"
+    template_file = "prompting/original.pmpt.tpl"
+
+    def dbg_render_prompt(self, kwargs):
+        if self.template_file:
+            tmp = Environment(loader=FileSystemLoader(".")).get_template(
+                name=self.template_file
+            )
+        elif self.template:
+            tmp = self.template  # type: ignore
+        else:
+            tmp = Template(self.prompt_template)
+        if isinstance(kwargs, dict):
+            x = tmp.render(**kwargs)
+        else:
+            x = tmp.render(**asdict(kwargs))
+        return x
+
+
+    def parse(self, out: str, input) -> Any:
+        # Encode the parsing logic
+        jsout = json.loads(out)
+        numturns = max([x["T"] for x in jsout])
+        preds = np.zeros(numturns+1, dtype=int)
+        for x in jsout:
+            turn = x["T"]
+            step = x["S"]
+            #preds[turn] = step if step != "N/A" else -1
+            preds[turn] = step
+        return preds
+
+class Aligner:
+    def __init__(self, args):
+        self.args = args
+        if args.doc_select == "",
+
+    def select_docs(self, dial):
+        # Stage 1: Align the whole dialogue to a doc
+        pass
+
+    def align_dial(self, dial, turns, doc, docsteps):
+        # Stage 2: Given a doc, align the turns in the dial to steps.
+        pass
+
+    def rerank_align(self, a):
+        # Stage 3: Given complete alignments of dial=>doc, pick the best one
+        pass
+
 
 if __name__ == "__main__":
-    dataset_obj = Abcd()
-    get_dataset = dataset_obj.get_dataset
-    get_dialogues_and_labels = dataset_obj.get_dialogues_and_labels
-
-    abcd_docs = get_dataset()
-    abcd_dial, abcd_labels = get_dialogues_and_labels()
-
+    from prompting_data import FloDial
     dataset_obj = FloDial()
-    get_dataset = dataset_obj.get_dataset
+    get_dataset = dataset_obj.get_docs
     get_dialogues_and_labels = dataset_obj.get_dialogues_and_labels
 
     flo_docs = get_dataset()
     flo_dial, flo_labels = get_dialogues_and_labels()
 
-    bm25d, bm25s = get_bm25([x["doc"] for x in flo_docs], [x["steps"] for x in flo_docs])
+    bm25d, bm25s = get_bm25(flo_docs)
     import pdb; pdb.set_trace()
