@@ -46,7 +46,7 @@ def main():
         dataset_obj = FloDial()
         data_path = Path("openai-data/flodial-guideline-docs.data")
     else:
-        raise NotImplementedErro(f"Unimplemented dataset {DATASET}")
+        raise NotImplementedError(f"Unimplemented dataset {DATASET}")
 
     print(f"RUNNING GPT ON DATASET {DATASET}")
 

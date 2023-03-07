@@ -133,9 +133,6 @@ def main():
 
             results = chainprompt(dial)
 
-            for i,result in enumerate(results):
-                if len(result["alignment"]) != len(turns):
-                    del results[i]
             filtered_results = [
                 r for r in results if len(r["alignment"]) == len(turns)
             ]

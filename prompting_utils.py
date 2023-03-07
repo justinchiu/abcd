@@ -15,6 +15,8 @@ from utils.manual_map import subflow_map
 
 EMBEDDING_MODEL = "text-embedding-ada-002"
 
+# DATA
+ 
 class Abcd:
     def get_guidelines(self, guidelines):
         docs = []
@@ -146,6 +148,7 @@ class FloDial:
             for dial in valid_dialogs
         ], agent_labels
 
+# / DATA
 
 def embed(x):
     emb = openai.Embedding.create(input=x["doc"], engine=EMBEDDING_MODEL)
