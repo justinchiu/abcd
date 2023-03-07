@@ -19,11 +19,12 @@ from jinja2 import (
 import openai
 from minichain import Prompt, EmbeddingPrompt, TemplatePrompt, show_log, start_chain
 
-from utils.manual_map import subflow_map
 from inference_utils import first
 
-from prompting_utils import get_dataset, embed, get_dialogues_and_labels
+#from prompting_utils import get_dataset, embed, get_dialogues_and_labels
+from prompting_utils import Abcd, FloDial, embed
 
+NUM_EXAMPLES = 25
 BATCH_SIZE = 128
 EMBEDDING_MODEL = "text-embedding-ada-002"
 LOG_NAME = "prompting"
@@ -31,15 +32,34 @@ LOG_NAME = "prompting"
 USE_CHAT = False
 MODEL = "gpt-3.5-turbo" if USE_CHAT else "text-davinci-003"
 
-def main():
+dataset_choices = ["abcd", "flodial", "sgd"]
+DATASET = dataset_choices[1]
+
+dataset_obj = None
+data_path = None
+if DATASET == "abcd":
+    dataset_obj = Abcd()
     data_path = Path("openai-data/guideline-docs.data")
+elif DATASET == "flodial":
+    dataset_obj = FloDial()
+    data_path = Path("openai-data/flodial-guideline-docs.data")
+else:
+    raise NotImplementedErro(f"Unimplemented dataset {DATASET}")
+
+get_dataset = dataset_obj.get_dataset
+get_dialogues_and_labels = dataset_obj.get_dialogues_and_labels
+
+
+def main():
     if data_path.exists():
+        print(f"Loading embedding from {data_path}")
         doc_embeddings = datasets.load_from_disk(data_path)
     else:
         print("WARNING: rerunning embedding")
         dataset = get_dataset()
         doc_embeddings = dataset.map(embed, batch_size=BATCH_SIZE, batched=True)
         doc_embeddings.save_to_disk(data_path)
+        print(f"Saved to {data_path}")
     doc_embeddings.add_faiss_index("embeddings")
 
     dialogues, labels = get_dialogues_and_labels()
@@ -96,7 +116,7 @@ def main():
         doc_acc = evaluate.load("accuracy")
         step_acc = evaluate.load("accuracy")
         #for x in track(dialogues):
-        for x in dialogues:
+        for x in dialogues[:NUM_EXAMPLES]:
             id = x["id"]
             dial = x["dialogue"]
             true_doc = x["doc"]
@@ -118,14 +138,24 @@ def main():
             #import pdb; pdb.set_trace()
             result = prompt(dict(dial=dial, doc=doc))
             bi_result = np.copy(result)
+            if len(bi_result) != len(true_labels):
+                # need to correct length. should be rare
+                if len(bi_result) > len(true_labels):
+                    bi_result = bi_result[:len(true_labels)]
+                elif len(bi_result) < len(true_labels):
+                    new_result = np.full(true_labels.shape, -2)
+                    new_result[:len(bi_result)] = bi_result
+                    bi_result = new_result
+            # filter out repeats
             bi_result[1:][bi_result[1:] == bi_result[:-1]] = -1
 
-            wrong_result = np.full(bi_result.shape, -2)
+            wrong_result = np.full(true_labels.shape, -2)
 
             steppred = bi_result if docpred == true_doc else wrong_result
 
             doc_acc.add(prediction=docpred == true_doc, reference=True)
             agent_mask = np.array([s == "agent" for s in speakers])
+
             step_acc.add_batch(
                 predictions=steppred[agent_mask],
                 references=true_labels[agent_mask],
@@ -133,7 +163,9 @@ def main():
 
         docacc = doc_acc.compute()
         stepacc = step_acc.compute()
+        print("docacc")
         print(docacc)
+        print("stepacc")
         print(stepacc)
 
     #show_log(LOG_NAME)
