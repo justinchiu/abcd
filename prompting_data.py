@@ -2,19 +2,12 @@ import evaluate
 import datasets
 from datasets import Dataset
 import numpy as np
-import torch
 from pathlib import Path
 import json
 from typing import Any
-from rich.progress import track
-from rank_bm25 import BM25Okapi
-
-import openai
 
 from utils.manual_map import subflow_map
 
-
-EMBEDDING_MODEL = "text-embedding-ada-002"
 
 class Abcd:
     def get_guidelines(self, guidelines):
@@ -147,35 +140,19 @@ class FloDial:
             for dial in valid_dialogs
         ], agent_labels
 
-# / DATA
-
-def embed(x):
-    emb = openai.Embedding.create(input=x["doc"], engine=EMBEDDING_MODEL)
-    return {"embeddings": [
-        np.array(emb['data'][i]['embedding'])
-        for i in range(len(emb["data"]))
-    ]}
-
-def get_bm25(docs):
-    bm25d = BM25Okapi([doc["doc"].lower().split() for doc in docs])
-    bm25s = [BM25Okapi([step.lower().split() for step in doc["steps"]]) for doc in docs]
-    return bm25d, bm25s
-
 
 if __name__ == "__main__":
     dataset_obj = Abcd()
-    get_dataset = dataset_obj.get_dataset
+    get_dataset = dataset_obj.get_docs
     get_dialogues_and_labels = dataset_obj.get_dialogues_and_labels
 
     abcd_docs = get_dataset()
     abcd_dial, abcd_labels = get_dialogues_and_labels()
 
     dataset_obj = FloDial()
-    get_dataset = dataset_obj.get_dataset
+    get_dataset = dataset_obj.get_docs
     get_dialogues_and_labels = dataset_obj.get_dialogues_and_labels
 
     flo_docs = get_dataset()
     flo_dial, flo_labels = get_dialogues_and_labels()
 
-    bm25d, bm25s = get_bm25([x["doc"] for x in flo_docs], [x["steps"] for x in flo_docs])
-    import pdb; pdb.set_trace()
