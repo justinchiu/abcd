@@ -12,7 +12,7 @@
 #SBATCH --get-user-env                       # retrieve the users login environment
 #SBATCH --mem=16000                          # server memory requested (per node)
 #SBATCH -t 48:00:00                           # Time limit (hh:mm:ss)
-#SBATCH --nodelist=rush-compute-03 # Request partition
+##SBATCH --nodelist=rush-compute-03 # Request partition
 ##SBATCH --nodelist=rush-compute-02 # Request partition
 ##SBATCH --nodelist=rush-compute-01 # Request partition
 #SBATCH --partition=rush,gpu # Request partition
@@ -83,4 +83,9 @@ py113env
 #python run_ws_answer_model.py --num_z_samples 4 --batch_size 1 --eval_batch_size 2 --max_length 512 --eval_steps 250 --epoch 10 --prefix 31 --gradient_accumulation_steps 16
 
 # doc step model ml256 3/1
-python run_doc_step_model.py --batch_size 1 --eval_batch_size 4 --max_length 256 --max_step_length 128 --eval_steps 250 --epoch 10 --prefix 228 --gradient_accumulation_steps 16 --max_turns 128 --learning_rate 1e-5 --num_z_samples 2 --monotonic_train --decoder_turn_attention --init_from_previous
+#python run_doc_step_model.py --batch_size 1 --eval_batch_size 4 --max_length 256 --max_step_length 128 --eval_steps 250 --epoch 10 --prefix 31 --gradient_accumulation_steps 16 --max_turns 128 --learning_rate 1e-5 --num_z_samples 2 --monotonic_train --decoder_turn_attention --init_from_previous
+
+
+# oracle sent bart-base ml512 3/5
+#python run_oracle_sent_model.py --batch_size 1 --eval_batch_size 4 --max_length 512 --eval_steps 250 --epoch 10 --prefix 35 --gradient_accumulation_steps 16 --max_turns 128 --learning_rate 2e-5
+python run_oracle_sent_model.py --batch_size 1 --eval_batch_size 4 --max_length 512 --eval_steps 250 --epoch 10 --prefix 35 --gradient_accumulation_steps 16 --max_turns 128 --learning_rate 1e-5
