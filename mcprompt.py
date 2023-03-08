@@ -21,44 +21,27 @@ from minichain import Prompt, EmbeddingPrompt, TemplatePrompt, show_log, start_c
 
 from inference_utils import first, monotonic_prediction, first_monotonic_arg_max
 
-#from prompting_utils import get_dataset, embed, get_dialogues_and_labels
+from prompting_args import get_args
 from prompting_data import Abcd, FloDial
-from prompting_utils import (
-    embed,
-    get_bm25,
-    KnnPrompt,
-    AlignmentPrompt,
-)
-
-NUM_EXAMPLES = 25
-BATCH_SIZE = 128
-K_DOCS = 3
-EMBEDDING_MODEL = "text-embedding-ada-002"
-LOG_NAME = "prompting"
-
-USE_CHAT = False
-MODEL = "gpt-3.5-turbo" if USE_CHAT else "text-davinci-003"
-
-dataset_choices = ["abcd", "flodial", "sgd"]
-DATASET = dataset_choices[1]
+from prompting_utils import embed, Aligner
 
 
-def main():
-    dataset_obj = None
+def main(args):
+    doc_obj = None
     data_path = None
-    if DATASET == "abcd":
+    if args.dataset == "abcd":
         doc_obj = Abcd()
         data_path = Path("openai-data/guideline-docs.data")
-    elif DATASET == "flodial":
+    elif args.dataset == "flodial":
         doc_obj = FloDial()
         data_path = Path("openai-data/flodial-guideline-docs.data")
     else:
-        raise NotImplementedError(f"Unimplemented dataset {DATASET}")
+        raise NotImplementedError(f"Unimplemented dataset {args.dataset}")
 
-    print(f"RUNNING GPT ON DATASET {DATASET}")
+    print(f"RUNNING ON DATASET {args.dataset}")
 
     get_docs = doc_obj.get_docs
-    get_dialogues_and_labels = dataset_obj.get_dialogues_and_labels
+    get_dialogues_and_labels = doc_obj.get_dialogues_and_labels
 
     if data_path.exists():
         print(f"Loading embedding from {data_path}")
@@ -66,97 +49,44 @@ def main():
     else:
         print("WARNING: rerunning embedding")
         doc_dataset = get_docs()
-        doc_embeddings = dataset.map(embed, batch_size=BATCH_SIZE, batched=True)
+        doc_embeddings = dataset.map(embed, batch_size=128, batched=True)
         doc_embeddings.save_to_disk(data_path)
         print(f"Saved to {data_path}")
     doc_embeddings.add_faiss_index("embeddings")
 
     dialogues, labels = get_dialogues_and_labels()
 
-    # BM25
-    bm25d, bm25s = get_bm25(doc_embeddings)
-
-    with start_chain(LOG_NAME) as backend:
-        knnprompt = KnnPrompt(backend.OpenAIEmbed(), (doc_embeddings, K_DOCS))
-        completion_backend = backend.OpenAIChat if USE_CHAT else backend.OpenAI
-        prompt = AlignmentPrompt(completion_backend(model=MODEL,max_tokens=1024))
+    with start_chain(args.log_name) as backend:
+        # initialize decision model
+        aligner = Aligner(args, doc_embeddings, backend)
 
         doc_acc = evaluate.load("accuracy")
         step_acc = evaluate.load("accuracy")
+
         #for x in track(dialogues):
-        for x in dialogues[:NUM_EXAMPLES]:
+        for x in dialogues[:args.num_examples]:
             id = x["id"]
             dial = x["dialogue"]
             true_doc = x["doc"]
             speakers = x["speakers"]
             turns = x["turns"]
             true_labels = first(np.array(labels[id], dtype=int))
-            wrong_result = np.full(true_labels.shape, -2)
+            all_wrong = np.full(true_labels.shape, -2)
 
             # DOCUMENT SCORING
-            # ada embedding
-            knnresult = knnprompt(dial)
-            docpreds = knnresult["titles"]
-            docs = knnresult["docs"]
-            steps = knnresult["steps"]
-            scores = knnresult["scores"]
-
-            # bm25
-            lexical_scores = bm25d.get_scores(dial.lower().split())
-            lexical_doc_idxs = np.argsort(-lexical_scores)[:3].tolist()
-
-            lexical_docpreds = [doc_embeddings[x]["title"] for x in lexical_doc_idxs]
-            lexical_docs = [doc_embeddings[x]["doc"] for x in lexical_doc_idxs]
-            lexical_steps = [doc_embeddings[x]["steps"] for x in lexical_doc_idxs]
-            lexical_scores = lexical_scores[lexical_doc_idxs]
+            doc_selection = aligner.select_docs(dial)
 
             # STEP PREDICTION
-            # lexical
-            lexical_alignments = []
-            lexical_align_scores = []
-            for idx, title, doc, steps, score in zip(
-                lexical_doc_idxs, lexical_docpreds, lexical_docs, lexical_steps, lexical_scores,
-            ):
-                scores = np.stack([
-                    bm25s[idx].get_scores(turn.split())
-                    for turn in turns
-                ]) # shape = turns x steps
-                lexical_align_preds = scores.argmax(-1)
-                lexical_align_preds[1:][lexical_align_preds[1:] == lexical_align_preds[:-1]] = -1
-                lexical_align_score = scores.max(-1).sum()
-                lexical_alignments.append(lexical_align_preds)
-                lexical_align_scores.append(lexical_align_score)
-
-            lexical_argmax = np.argmax(lexical_align_scores)
-            lexical_docpred = lexical_alignments[lexical_argmax]
-            lexical_doc = lexical_docpreds[lexical_argmax]
-
-            """
-            # gpt
-            docpred = docpreds[0]
-            doc = docs[0]
-            out = prompt.dbg_render_prompt(dict(dial=dial, doc=doc))
-            print(out)
-            #import pdb; pdb.set_trace()
-            result = prompt(dict(dial=dial, doc=doc))
-            bi_result = np.copy(result)
-            # length correction fn
-            if len(bi_result) != len(true_labels):
-                # need to correct length. should be rare
-                if len(bi_result) > len(true_labels):
-                    bi_result = bi_result[:len(true_labels)]
-                elif len(bi_result) < len(true_labels):
-                    new_result = np.full(true_labels.shape, -2)
-                    new_result[:len(bi_result)] = bi_result
-                    bi_result = new_result
-            # filter out repeats fn
-            bi_result[1:][bi_result[1:] == bi_result[:-1]] = -1
-            steppred = bi_result if docpred == true_doc else wrong_result
-            """
+            step_align = aligner.align_dial(dial, turns, doc_selection)
 
             # DOCUMENT+STEP SELECTION
-            steppred = lexical_docpred
-            docpred = lexical_doc
+            steppred, docpred = aligner.rerank_align(step_align)
+            #steppred = lexical_docpred
+            #docpred = lexical_doc
+
+            steppred[1:][steppred[1:] == steppred[:-1]] = -1
+
+            steppred = steppred if docpred == true_doc else all_wrong
 
             doc_acc.add(prediction=docpred == true_doc, reference=True)
             agent_mask = np.array([s == "agent" for s in speakers])
@@ -173,7 +103,8 @@ def main():
         print("stepacc")
         print(stepacc)
 
-    #show_log(LOG_NAME)
+    #show_log(args.log_name)
 
 if __name__ == "__main__":
-    main()
+    args = get_args()
+    main(args)
