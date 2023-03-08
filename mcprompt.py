@@ -63,6 +63,8 @@ def main(args):
         doc_acc = evaluate.load("accuracy")
         step_acc = evaluate.load("accuracy")
 
+        doc_rec = evaluate.load("accuracy")
+
         #for x in track(dialogues):
         for x in dialogues[:args.num_examples]:
             id = x["id"]
@@ -107,12 +109,17 @@ def main(args):
                 references=true_labels[agent_mask],
             )
 
+            doc_rec.add(prediction=true_doc in doc_selection.titles, reference=True)
+
         docacc = doc_acc.compute()
         stepacc = step_acc.compute()
+        docrec = doc_rec.compute()
         print("docacc")
         print(docacc)
         print("stepacc")
         print(stepacc)
+        print("docrec")
+        print(docrec)
 
     #show_log(args.log_name)
 

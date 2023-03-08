@@ -11,3 +11,7 @@ wandb
 # experimental
 rank_bm25
 evaluate
+
+# prompting
+manifest-ml
+git+https://github.com/srush/MiniChain
