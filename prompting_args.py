@@ -25,9 +25,10 @@ def get_args():
         default="lex",
     )
     parser.add_argument(
-        "--align_rerank",
-        choices=["docscore", "alignscore", "sum"],
-        default="alignscore",
+        "--rerank",
+        choices=["docscore", "stepscore", "sum"],
+        #default="alignscore",
+        default="docscore",
     )
 
     parser.add_argument("--k_docs", type=int, default=3)

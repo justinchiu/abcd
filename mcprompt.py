@@ -80,10 +80,11 @@ def main(args):
             step_align = aligner.align_dial(dial, turns, doc_selection)
 
             # DOCUMENT+STEP SELECTION
-            steppred, docpred = aligner.rerank_align(step_align)
-            #steppred = lexical_docpred
-            #docpred = lexical_doc
+            alignment = aligner.rerank_align(step_align)
+            steppred = alignment.alignment
+            docpred = alignment.title
 
+            # smooth
             steppred[1:][steppred[1:] == steppred[:-1]] = -1
 
             steppred = steppred if docpred == true_doc else all_wrong

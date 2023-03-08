@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import evaluate
 import datasets
 from datasets import Dataset
@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from pathlib import Path
 import json
-from typing import Any
+from typing import Any, Union
 from rich.progress import track
 from rank_bm25 import BM25Okapi
 
@@ -76,25 +76,37 @@ class DocAlignmentPrompt(TemplatePrompt):
         return preds
 
 @dataclass
-class DocSelection:
-    titles: list[str]
-    docs: list[str]
-    steps: list[list[str]]
-    scores: list[float]
+class AlignedOutput:
+    title: str
+    doc: str
+    steps: list[str]
+    doc_score: float
+    alignment: np.ndarray
+    step_score: float
 
 @dataclass
-class DocStepAlign:
+class AlignOutput:
     titles: list[str]
     docs: list[str]
     steps: list[list[str]]
     doc_scores: list[float]
-    alignments: np.array
-    align_scores: list[float]
+    alignments: Union[np.ndarray, None] = None
+    step_scores: Union[np.ndarray, None] = None
 
+    def index(self, idx):
+        return AlignedOutput(
+            title = self.titles[idx],
+            doc = self.docs[idx],
+            doc_score = self.doc_scores[idx],
+            steps = self.steps[idx],
+            alignment = self.alignments[idx],
+            step_score = self.step_scores[idx],
+        )
 
 class Aligner:
     def __init__(self, args, docs, backend):
         self.args = args
+        self.docs = docs
         self.model = "gpt-3.5-turbo" if args.use_chat else "text-davinci-003"
 
         # setup knn
@@ -117,26 +129,27 @@ class Aligner:
         # Stage 1: Align the whole dialogue to a doc
         if self.args.doc_selection == "emb":
             knnresult = self.knnprompt(dial)
-            return DocSelection(
+            return AlignOutput(
                 titles = knnresult["titles"],
                 docs = knnresult["docs"],
                 steps = knnresult["steps"],
-                scores = knnresult["scores"],
+                # aiss distance smaller = better. negate
+                doc_scores = -knnresult["scores"],
             )
         elif self.args.doc_selection == "lex":
             lexical_scores = self.bm25d.get_scores(dial.lower().split())
-            lexical_doc_idxs = np.argsort(-lexical_scores)[:3].tolist()
+            lexical_doc_idxs = np.argsort(-lexical_scores)[:self.args.k_docs].tolist()
 
-            titles = [doc_embeddings[x]["title"] for x in lexical_doc_idxs]
-            docs = [doc_embeddings[x]["doc"] for x in lexical_doc_idxs]
-            steps = [doc_embeddings[x]["steps"] for x in lexical_doc_idxs]
+            titles = [self.docs[x]["title"] for x in lexical_doc_idxs]
+            docs = [self.docs[x]["doc"] for x in lexical_doc_idxs]
+            steps = [self.docs[x]["steps"] for x in lexical_doc_idxs]
             scores = lexical_scores[lexical_doc_idxs]
 
-            return DocSelection(
+            return AlignOutput(
                 titles = titles,
                 docs = docs,
                 steps = steps,
-                scores = scores,
+                doc_scores = scores,
             )
         else:
             raise NotImplementedError
@@ -145,10 +158,10 @@ class Aligner:
         # Stage 2: Given a doc, align the turns in the dial to steps.
         if self.args.step_align == "lex":
             alignments = []
-            align_scores = []
+            step_scores = []
             for title, doc, steps, score in zip(
                 doc_out.titles, doc_out.docs,
-                doc_out.steps, doc_out.scores,
+                doc_out.steps, doc_out.doc_scores,
             ):
                 scores = np.stack([
                     self.bm25s[title].get_scores(turn.split())
@@ -158,15 +171,12 @@ class Aligner:
                 align_preds[1:][align_preds[1:] == align_preds[:-1]] = -1
                 align_score = scores.max(-1).sum()
                 alignments.append(align_preds)
-                align_scores.append(align_score)
+                step_scores.append(align_score)
 
-            return DocStepAlign(
-                titles = doc_out.titles,
-                docs = doc_out.docs,
-                steps = doc_out.steps,
-                doc_scores = doc_out.scores,
+            return replace(
+                doc_out,
                 alignments = np.stack(alignments),
-                align_scores = align_scores,
+                step_scores = np.array(step_scores),
             )
             #lexical_argmax = np.argmax(lexical_align_scores)
             #lexical_docpred = lexical_alignments[lexical_argmax]
@@ -186,13 +196,25 @@ class Aligner:
             # filter out repeats fn
             bi_result[1:][bi_result[1:] == bi_result[:-1]] = -1
             import pdb; pdb.set_trace()
-            return DocStepAlign()
+            return replace(
+                doc_out,
+                alignments = None,
+            )
         else:
             raise NotImplementedError
 
     def rerank_align(self, alignments):
         # Stage 3: Given complete alignments of dial=>doc, pick the best one
-        import pdb; pdb.set_trace()
+        if self.args.rerank == "docscore":
+            idx = np.argmax(alignments.doc_scores)
+            return alignments.index(idx)
+        elif self.args.rerank == "stepscore":
+            idx = np.argmax(alignments.step_scores)
+            return alignments.index(idx)
+        elif self.args.rerank == "sum":
+            raise NotImplementedError
+        else:
+            raise NotImplementedError
 
 
 if __name__ == "__main__":
