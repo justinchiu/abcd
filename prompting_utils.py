@@ -75,6 +75,9 @@ class StepAlignmentPrompt(TemplatePrompt):
             preds[turn] = step
         return preds
 
+class TurnStepAlignmentPrompt(TemplatePrompt):
+    template_file = "prompting/"
+
 @dataclass
 class AlignedOutput:
     title: str
@@ -195,11 +198,13 @@ class Aligner:
                 alignments=result[None],
                 step_scores=np.zeros(1),
             )
+        elif self.args.stepsel == "askstep":
+            import pdb; pdb.set_trace()
         else:
             raise NotImplementedError
 
     def rerank(self, alignments):
-        # Stage 3: Given complete alignments of dial=>doc, pick the best one
+        # Stage 3: Pick best alignment of dial turns => doc steps
         if self.args.rerank == "docscore":
             idx = np.argmax(alignments.doc_scores)
             return alignments.index(idx)
