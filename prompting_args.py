@@ -15,12 +15,12 @@ def get_args():
     # decision options
     parser.add_argument_group("decision")
     parser.add_argument(
-        "--doc_selection",
+        "--docsel",
         choices=["lex", "model", "emb"],
         default="emb",
     )
     parser.add_argument(
-        "--step_align",
+        "--stepsel",
         choices=["lex", "model", "askdoc", "askturn", "askturnstep"],
         default="lex",
     )

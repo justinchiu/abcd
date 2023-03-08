@@ -42,7 +42,7 @@ class KnnPrompt(EmbeddingPrompt):
             "scores": res.scores,
         }
 
-class DocAlignmentPrompt(TemplatePrompt):
+class StepAlignmentPrompt(TemplatePrompt):
     #template_file = "prompting/align.pmpt.tpl"
     #template_file = "prompting/zeroshotalign.pmpt.tpl"
     template_file = "prompting/original.pmpt.tpl"
@@ -81,8 +81,8 @@ class AlignedOutput:
     doc: str
     steps: list[str]
     doc_score: float
-    alignment: np.ndarray
-    step_score: float
+    alignment: Union[np.ndarray, None] = None
+    step_score: Union[float, None] = None
 
 @dataclass
 class AlignOutput:
@@ -99,8 +99,8 @@ class AlignOutput:
             doc = self.docs[idx],
             doc_score = self.doc_scores[idx],
             steps = self.steps[idx],
-            alignment = self.alignments[idx],
-            step_score = self.step_scores[idx],
+            alignment = self.alignments[idx] if self.alignments is not None else None,
+            step_score = self.step_scores[idx] if self.step_scores is not None else None,
         )
 
 class Aligner:
@@ -110,24 +110,24 @@ class Aligner:
         self.model = "gpt-3.5-turbo" if args.use_chat else "text-davinci-003"
 
         # setup knn
-        if args.doc_selection == "emb":
+        if args.docsel == "emb":
             self.knnprompt = KnnPrompt(backend.OpenAIEmbed(), (docs, args.k_docs))
 
         # setup align prompt
         completion_backend = backend.OpenAIChat if args.use_chat else backend.OpenAI
-        if args.step_align == "askdoc":
-            self.alignprompt = DocAlignmentPrompt(completion_backend(
+        if args.stepsel == "askdoc":
+            self.stepprompt = StepAlignmentPrompt(completion_backend(
                 model=self.model,
                 max_tokens=1024,
             ))
 
         # setup lexical
-        if args.doc_selection == "lex" or args.step_align == "lex":
+        if args.docsel == "lex" or args.stepsel == "lex":
             self.bm25d, self.bm25s = get_bm25(docs)
 
     def select_docs(self, dial):
         # Stage 1: Align the whole dialogue to a doc
-        if self.args.doc_selection == "emb":
+        if self.args.docsel == "emb":
             knnresult = self.knnprompt(dial)
             return AlignOutput(
                 titles = knnresult["titles"],
@@ -136,7 +136,7 @@ class Aligner:
                 # aiss distance smaller = better. negate
                 doc_scores = -knnresult["scores"],
             )
-        elif self.args.doc_selection == "lex":
+        elif self.args.docsel == "lex":
             lexical_scores = self.bm25d.get_scores(dial.lower().split())
             lexical_doc_idxs = np.argsort(-lexical_scores)[:self.args.k_docs].tolist()
 
@@ -154,9 +154,9 @@ class Aligner:
         else:
             raise NotImplementedError
 
-    def align_dial(self, dial, turns, doc_out):
+    def select_steps(self, dial, turns, doc_out):
         # Stage 2: Given a doc, align the turns in the dial to steps.
-        if self.args.step_align == "lex":
+        if self.args.stepsel == "lex":
             alignments = []
             step_scores = []
             for title, doc, steps, score in zip(
@@ -181,29 +181,24 @@ class Aligner:
             #lexical_argmax = np.argmax(lexical_align_scores)
             #lexical_docpred = lexical_alignments[lexical_argmax]
             #lexical_doc = lexical_docpreds[lexical_argmax]
-        elif self.args.step_align == "askdoc":
-            result = prompt(dict(dial=dial, doc=doc))
-            bi_result = np.copy(result)
-            # length correction fn
-            if len(bi_result) != len(true_labels):
-                # need to correct length. should be rare
-                if len(bi_result) > len(true_labels):
-                    bi_result = bi_result[:len(true_labels)]
-                elif len(bi_result) < len(true_labels):
-                    new_result = np.full(true_labels.shape, -2)
-                    new_result[:len(bi_result)] = bi_result
-                    bi_result = new_result
-            # filter out repeats fn
-            bi_result[1:][bi_result[1:] == bi_result[:-1]] = -1
-            import pdb; pdb.set_trace()
-            return replace(
-                doc_out,
-                alignments = None,
+        elif self.args.stepsel == "askdoc":
+            # just take the best one. no point asking for every doc.
+            doc = doc_out.index(0)
+            result = self.stepprompt(dict(dial=dial, doc=doc.doc))
+
+            # singleton output
+            return AlignOutput(
+                titles=[doc.title],
+                docs=[doc.doc],
+                steps=[doc.steps],
+                doc_scores=[doc.doc_score],
+                alignments=result[None],
+                step_scores=np.zeros(1),
             )
         else:
             raise NotImplementedError
 
-    def rerank_align(self, alignments):
+    def rerank(self, alignments):
         # Stage 3: Given complete alignments of dial=>doc, pick the best one
         if self.args.rerank == "docscore":
             idx = np.argmax(alignments.doc_scores)

@@ -77,13 +77,23 @@ def main(args):
             doc_selection = aligner.select_docs(dial)
 
             # STEP PREDICTION
-            step_align = aligner.align_dial(dial, turns, doc_selection)
+            step_align = aligner.select_steps(dial, turns, doc_selection)
 
             # DOCUMENT+STEP SELECTION
-            alignment = aligner.rerank_align(step_align)
+            alignment = aligner.rerank(step_align)
             steppred = alignment.alignment
             docpred = alignment.title
 
+            # length correction fn
+            if len(steppred) != len(true_labels):
+                print("CORRECTING LENGTH")
+                # need to correct length. should be rare
+                if len(steppred) > len(true_labels):
+                    steppred = steppred[:len(true_labels)]
+                elif len(steppred) < len(true_labels):
+                    new_result = np.full(true_labels.shape, -2)
+                    new_result[:len(steppred)] = steppred
+                    steppred = new_result
             # smooth
             steppred[1:][steppred[1:] == steppred[:-1]] = -1
 
