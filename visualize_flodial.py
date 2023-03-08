@@ -26,14 +26,15 @@ id = str(example["id"])
 dialogue = example["turns"]
 title = example["doc"]
 document_sents = [d["steps"] for d in docs if d["title"] == title][0]
+step_labels = labels[id]
 
 st.write(f"# Conversation id: {id}")
 
-
 st.write("## Dialogue")
-for t, turn in enumerate(dialogue):
-    string = f"(turn {t}) {turn}"
-    st.markdown(string, unsafe_allow_html=True)
+for t, (turn, step) in enumerate(zip(dialogue, step_labels)):
+    st.write(f"(turn {t}, STEP {step}) {document_sents[step]}" if step != -1 else "no step")
+    st.write(f"(turn {t}, step {step}) {turn}")
+    st.write()
 
 
 with st.sidebar:
