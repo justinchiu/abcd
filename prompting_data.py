@@ -109,7 +109,7 @@ class FloDial:
         return int(idx) if source == "chart" else -1
 
 
-    def get_dialogues_and_labels(self):
+    def get_dialogues_and_labels(self, split="valid"):
         with Path("FloDial-dataset/dialogs/s-flo.json").open("r") as f:
             data_split = json.load(f)
         with Path("FloDial-dataset/dialogs/dialogs.json").open("r") as f:
@@ -129,6 +129,8 @@ class FloDial:
             for id, dial in dialogs.items()
         }
 
+        this_dialogs = valid_dialogs if split == "valid" else train_dialogs
+
         return [
             {
                 "id": str(dial["id"]),
@@ -137,7 +139,7 @@ class FloDial:
                 "speakers": [turn["speaker"] for turn in dial[dial_key]],
                 "turns": [f"{turn['speaker']}: {turn['utterance']}" for turn in dial[dial_key]],
             }
-            for dial in valid_dialogs
+            for dial in this_dialogs
         ], agent_labels
 
 
