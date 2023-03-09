@@ -57,7 +57,7 @@ class StepKnnPrompt(EmbeddingPrompt):
             "scores": scores,
         }
 
-class StepAlignmentPrompt(TemplatePrompt):
+class DocAlignmentPrompt(TemplatePrompt):
     #template_file = "prompting/align.pmpt.tpl"
     #template_file = "prompting/zeroshotalign.pmpt.tpl"
     template_file = "prompting/original.pmpt.tpl"
@@ -90,8 +90,11 @@ class StepAlignmentPrompt(TemplatePrompt):
             preds[turn] = step
         return preds
 
-class TurnStepAlignmentPrompt(TemplatePrompt):
-    template_file = "prompting/"
+class AbcdTurnAlignmentPrompt(TemplatePrompt):
+    template_file = "prompting/abcd-turnstepalign.pmpt.tpl"
+
+class FloDialTurnStepAlignmentPrompt(TemplatePrompt):
+    template_file = "prompting/flodial-turnstepalign.pmpt.tpl"
 
 @dataclass
 class AlignedOutput:
@@ -152,7 +155,16 @@ class Aligner:
         # setup align prompt
         completion_backend = backend.OpenAIChat if args.use_chat else backend.OpenAI
         if args.stepsel == "askdoc":
-            self.stepprompt = StepAlignmentPrompt(completion_backend(
+            self.stepprompt = DocAlignmentPrompt(completion_backend(
+                model=self.model,
+                max_tokens=1024,
+            ))
+        elif args.stepsel == "askturn":
+            if args.dataset == "abcd":
+                prompt = AbcdTurnAlignmentPrompt
+            elif args.dataset == "flodial":
+                prompt = FloDialTurnAlignmentPrompt
+            self.stepprompt = prompt(completion_backend(
                 model=self.model,
                 max_tokens=1024,
             ))
