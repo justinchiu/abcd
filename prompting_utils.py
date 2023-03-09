@@ -90,16 +90,17 @@ class DialAlignmentPrompt(TemplatePrompt):
             preds[turn] = step
         return preds
 
-class AbcdTurnAlignmentPrompt(TemplatePrompt):
-    template_file = "prompting/abcd-turnalign.pmpt.tpl"
 
-class FloDialTurnAlignmentPrompt(TemplatePrompt):
-    template_file = "prompting/flodial-turnalign.pmpt.tpl"
+class TurnAlignPrompt(TemplatePrompt):
+    template_file = "prompting/turnalign.pmpt.tpl"
+    def parse(self, out: str, input) -> int:
+        return int(out)
 
-class AbcdTurnStepAlignmentPrompt(TemplatePrompt):
+
+class AbcdTurnStepAlignPrompt(TemplatePrompt):
     template_file = "prompting/abcd-turnstepalign.pmpt.tpl"
 
-class FloDialTurnStepAlignmentPrompt(TemplatePrompt):
+class FloDialTurnStepAlignPrompt(TemplatePrompt):
     template_file = "prompting/flodial-turnstepalign.pmpt.tpl"
 
 @dataclass
@@ -166,13 +167,9 @@ class Aligner:
                 max_tokens=1024,
             ))
         elif args.stepsel == "askturn":
-            if args.dataset == "abcd":
-                prompt = AbcdTurnAlignmentPrompt
-            elif args.dataset == "flodial":
-                prompt = FloDialTurnAlignmentPrompt
-            self.stepprompt = prompt(completion_backend(
+            self.stepprompt = TurnAlignPrompt(completion_backend(
                 model=self.model,
-                max_tokens=1024,
+                max_tokens=1,
             ))
 
         # setup lexical
@@ -268,8 +265,24 @@ class Aligner:
                 alignments=result[None],
                 step_scores=np.zeros(1),
             )
-        elif self.args.stepsel == "askstep":
-            import pdb; pdb.set_trace()
+        elif self.args.stepsel == "askturn":
+            alignments = []
+            scores = []
+            for title, doc, steps, score in zip(
+                doc_out.titles, doc_out.docs,
+                doc_out.steps, doc_out.doc_scores,
+            ):
+                alignments.append(np.array([
+                    self.stepprompt(dict(turn=turn, doc=doc)) for turn in turns
+                ]))
+                # use the same score
+                scores.append(score)
+
+            return replace(
+                doc_out,
+                alignments = np.stack(alignments),
+                step_scores = np.array(scores),
+            )
         else:
             raise NotImplementedError
 
