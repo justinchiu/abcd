@@ -282,7 +282,7 @@ class Aligner:
             ):
                 results = [self.stepknnprompts[title](turn)["scores"] for turn in turns]
                 # turns x steps
-                scores = np.stack([x["scores"] for x in results])
+                scores = np.stack(results)
                 preds, score = self.stepdecision(torch.tensor(scores))
 
                 alignments.append(preds)
