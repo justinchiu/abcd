@@ -8,14 +8,6 @@ import json
 from typing import Any
 from rich.progress import track
 
-from jinja2 import (
-    Environment,
-    FileSystemLoader,
-    PackageLoader,
-    Template,
-    select_autoescape,
-)
-
 import openai
 from minichain import Prompt, EmbeddingPrompt, TemplatePrompt, show_log, start_chain
 
@@ -93,7 +85,8 @@ def main(args):
             true_doc = x["doc"]
             speakers = x["speakers"]
             turns = x["turns"]
-            true_labels = first(np.array(labels[id], dtype=int))
+            #true_labels = first(np.array(labels[id], dtype=int))
+            true_labels = np.array(labels[id], dtype=int)
             all_wrong = np.full(true_labels.shape, -2)
 
             # DOCUMENT SCORING
@@ -118,7 +111,7 @@ def main(args):
                     new_result[:len(steppred)] = steppred
                     steppred = new_result
             # smooth
-            steppred[1:][steppred[1:] == steppred[:-1]] = -1
+            #steppred[1:][steppred[1:] == steppred[:-1]] = -1
 
             steppred = steppred if docpred == true_doc else all_wrong
 
@@ -131,6 +124,7 @@ def main(args):
             )
 
             doc_rec.add(prediction=true_doc in doc_selection.titles, reference=True)
+            #import pdb; pdb.set_trace()
 
         docacc = doc_acc.compute()
         stepacc = step_acc.compute()

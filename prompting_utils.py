@@ -9,13 +9,37 @@ import json
 from typing import Any, Union
 from rich.progress import track
 from rank_bm25 import BM25Okapi
+from jinja2 import (
+    Environment,
+    FileSystemLoader,
+    PackageLoader,
+    Template,
+    select_autoescape,
+)
 
 import openai
-from minichain import Prompt, EmbeddingPrompt, TemplatePrompt, show_log, start_chain
+from minichain import Prompt, EmbeddingPrompt, show_log, start_chain
+from minichain import TemplatePrompt as McTemplatePrompt
 
 from inference_utils import amax, afirstmax, amono, afirstmono
 
 EMBEDDING_MODEL = "text-embedding-ada-002"
+
+class TemplatePrompt(McTemplatePrompt):
+    def print(self, kwargs):
+        if self.template_file:
+            tmp = Environment(loader=FileSystemLoader(".")).get_template(
+                name=self.template_file
+            )
+        elif self.template:
+            tmp = self.template  # type: ignore
+        else:
+            tmp = Template(self.prompt_template)
+        if isinstance(kwargs, dict):
+            x = tmp.render(**kwargs)
+        else:
+            x = tmp.render(**asdict(kwargs))
+        return x
 
 def embed(x):
     emb = openai.Embedding.create(input=x["text"], engine=EMBEDDING_MODEL)
@@ -62,20 +86,6 @@ class DialAlignmentPrompt(TemplatePrompt):
     #template_file = "prompting/zeroshotalign.pmpt.tpl"
     template_file = "prompting/original.pmpt.tpl"
 
-    def dbg_render_prompt(self, kwargs):
-        if self.template_file:
-            tmp = Environment(loader=FileSystemLoader(".")).get_template(
-                name=self.template_file
-            )
-        elif self.template:
-            tmp = self.template  # type: ignore
-        else:
-            tmp = Template(self.prompt_template)
-        if isinstance(kwargs, dict):
-            x = tmp.render(**kwargs)
-        else:
-            x = tmp.render(**asdict(kwargs))
-        return x
 
 
     def parse(self, out: str, input) -> Any:
@@ -312,10 +322,20 @@ class Aligner:
                 topksteps = ["\n".join([
                     f"Step {i}: {steps[idx]}" for i, idx in enumerate(idxs)
                 ]) for idxs in topk]
+                align = []
+                for i, (turn, topsteps) in enumerate(zip(turns, topksteps)):
+                    answer = self.stepprompt(dict(turn=turn, doc=topsteps))
+                    align.append(topk[i,answer])
+                    #print(self.stepprompt.print(dict(turn=turn, doc=topsteps)))
+                    #print(answer)
+                    #import pdb; pdb.set_trace()
+                """
                 alignments.append(np.array([
                     self.stepprompt(dict(turn=turn, doc=topsteps))
                     for turn, topsteps in zip(turns, topksteps)
                 ]))
+                """
+                alignments.append(np.array(align))
                 # use the same score
                 scores.append(score)
 
