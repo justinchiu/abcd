@@ -46,7 +46,7 @@ def get_args():
     parser.add_argument(
         "--stepprompt",
         choices=[
-            "0s", "8s",
+            "0s", "4s",
         ],
         default="0s",
     )
