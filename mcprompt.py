@@ -13,7 +13,7 @@ from minichain import Prompt, EmbeddingPrompt, TemplatePrompt, show_log, start_c
 
 from inference_utils import first, monotonic_prediction, first_monotonic_arg_max
 
-from prompting_args import get_args
+from prompting_args import get_args, get_logpath
 from prompting_data import Abcd, FloDial
 from prompting_utils import embed, Aligner
 
@@ -140,4 +140,5 @@ def main(args):
 
 if __name__ == "__main__":
     args = get_args()
+    args.log_name = get_logpath(args)
     main(args)
