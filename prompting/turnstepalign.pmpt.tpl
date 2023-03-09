@@ -1,7 +1,4 @@
-Step:
-{{doc}}
-Turn:
-{{turn}}
-
-Does Step mention similar things in Turn? Answer with Yes or No.
+A: {{step}}
+B: {{turn}}
+Is B a paraphrase of A? Answer with Yes or No.
 Answer: 

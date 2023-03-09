@@ -1,11 +1,6 @@
-State whether the Step and Turn are aligned.
-A Step is aligned to a Turn when a part of the Step explains the Turn.
-
-Step:
-Is there an open circuit with your car's key in 'run/ON' position?
-Turn:
-agent: Do you experience an open circuit when the car key is in 'ON' position?
-Aligned: True
+A: Is there an open circuit with your car's key in 'run/ON' position?
+B: Do you experience an open circuit when the car key is in 'ON' position?
+Is B a paraphrase of A?
 
 Step:
 Is there an open circuit with your car's key in 'run/ON' position?

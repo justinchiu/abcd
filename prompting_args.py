@@ -40,6 +40,7 @@ def get_args():
     )
 
     parser.add_argument("--k_docs", type=int, default=3)
+    parser.add_argument("--k_steps", type=int, default=3)
 
     # prompt options
     parser.add_argument_group("stepprompt")

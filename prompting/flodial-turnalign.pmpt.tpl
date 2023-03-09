@@ -1,4 +1,4 @@
-Which Step is most similar to Turn? Give your answer as the step number.
+Which Step is most similar to Turn? Give your answer as the step number. If no step is similar, answer with -1.
 
 Steps:
 Step 0: Looks like you had a temporary short circuit which blew the fuse link. You need to replace it with a new fusible link with the same or slightly lower rating.

@@ -109,8 +109,6 @@ class TurnAlignPrompt(TemplatePrompt):
 class TurnStepAlignPrompt(TemplatePrompt):
     template_file = "prompting/turnstepalign.pmpt.tpl"
     def parse(self, out: str, input) -> int:
-        if out.strip() == "Yes":
-            import pdb; pdb.set_trace()
         return out.strip() == "Yes"
 
 
@@ -159,6 +157,8 @@ class AlignOutput:
 class Aligner:
     def __init__(self, args, docs, doc_step_embs, backend):
         self.args = args
+        self.backend = backend
+
         self.docs = docs
         self.doc_step_embs = doc_step_embs
 
@@ -208,7 +208,7 @@ class Aligner:
                 prompt = AbcdTurnStepAlignPrompt
             elif args.dataset == "flodial":
                 prompt = FloDialTurnStepAlignPrompt
-            self.stepprompt = (completion_backend(
+            self.stepprompt = prompt(completion_backend(
                 model=self.model,
                 max_tokens=10,
             ))
@@ -318,7 +318,7 @@ class Aligner:
                 embscores = np.stack([
                     self.stepknnprompts[title](turn)["scores"] for turn in turns
                 ])
-                topk = np.argsort(-embscores, -1)[:,:6]
+                topk = np.argsort(-embscores, -1)[:,:self.args.k_steps]
                 topksteps = ["\n".join([
                     f"Step {i}: {steps[idx]}" for i, idx in enumerate(idxs)
                 ]) for idxs in topk]
@@ -326,9 +326,9 @@ class Aligner:
                 for i, (turn, topsteps) in enumerate(zip(turns, topksteps)):
                     answer = self.stepprompt(dict(turn=turn, doc=topsteps))
                     align.append(topk[i,answer])
-                    #print(self.stepprompt.print(dict(turn=turn, doc=topsteps)))
-                    #print(answer)
-                    #import pdb; pdb.set_trace()
+                    print(self.stepprompt.print(dict(turn=turn, doc=topsteps)))
+                    print(answer)
+                    import pdb; pdb.set_trace()
                 """
                 alignments.append(np.array([
                     self.stepprompt(dict(turn=turn, doc=topsteps))
@@ -346,7 +346,7 @@ class Aligner:
             )
         elif self.args.stepsel == "askturnstep":
             # don't run zeroshot
-            assert self.args.stepprompt != "0s"
+            #assert self.args.stepprompt != "0s"
 
             alignments = []
             scores = []
@@ -354,12 +354,33 @@ class Aligner:
                 doc_out.titles, doc_out.docs,
                 doc_out.steps, doc_out.doc_scores,
             ):
+                # pre-filter using embedding
+                embscores = np.stack([
+                    self.stepknnprompts[title](turn)["scores"] for turn in turns
+                ])
+                topk = np.argsort(-embscores, -1)[:,:self.args.k_steps]
+                topksteps = [
+                    [steps[idx] for idx in idxs]
+                    for idxs in topk
+                ]
+                align = []
+                for i,(turn, topsteps) in enumerate(zip(turns, topksteps)):
+                    turn2step = []
+                    for step in topsteps:
+                        answer = self.stepprompt(dict(turn=turn, step=step))
+                        print(self.stepprompt.print(dict(turn=turn, step=step)))
+                        print(answer)
+                        turn2step.append(answer)
+                    # either null align or align to earliest 
+                    turnalign = -1 if not any(turn2step) else topk[i][turn2step].min()
+                    align.append(turnalign)
+                """
                 align = np.array([
                     [self.stepprompt(dict(turn=turn, step=step)) for step in steps]
                     for turn in turns
                 ])
-                pred = align
-                alignments.append(pred)
+                """
+                alignments.append(align)
                 # use the same score
                 scores.append(score)
 
