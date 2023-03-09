@@ -38,4 +38,15 @@ def get_args():
 
     parser.add_argument("--k_docs", type=int, default=3)
 
+    # prompt options
+    parser.add_argument_group("stepprompt")
+    parser.add_argument(
+        "--stepprompt",
+        choices=[
+            "turnalign", "turnstepalign", "8shotturnalign",
+        ],
+        default="turnalign",
+    )
+
     return parser.parse_args()
+

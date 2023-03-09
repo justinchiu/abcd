@@ -96,12 +96,20 @@ class TurnAlignPrompt(TemplatePrompt):
     def parse(self, out: str, input) -> int:
         return int(out)
 
+class TurnStepAlignPrompt(TemplatePrompt):
+    template_file = "prompting/turnstepalign.pmpt.tpl"
+    def parse(self, out: str, input) -> int:
+        if out.strip() == "Yes":
+            import pdb; pdb.set_trace()
+        return out.strip() == "Yes"
+
 
 class AbcdTurnStepAlignPrompt(TemplatePrompt):
     template_file = "prompting/abcd-turnstepalign.pmpt.tpl"
 
 class FloDialTurnStepAlignPrompt(TemplatePrompt):
     template_file = "prompting/flodial-turnstepalign.pmpt.tpl"
+
 
 @dataclass
 class AlignedOutput:
@@ -169,8 +177,14 @@ class Aligner:
         elif args.stepsel == "askturn":
             self.stepprompt = TurnAlignPrompt(completion_backend(
                 model=self.model,
-                max_tokens=1,
+                max_tokens=2,
             ))
+        elif args.stepsel == "askturnstep":
+            self.stepprompt = TurnStepAlignPrompt(completion_backend(
+                model=self.model,
+                max_tokens=10,
+            ))
+
 
         # setup lexical
         if args.docsel == "lex" or args.stepsel == "lex":
@@ -275,6 +289,28 @@ class Aligner:
                 alignments.append(np.array([
                     self.stepprompt(dict(turn=turn, doc=doc)) for turn in turns
                 ]))
+                # use the same score
+                scores.append(score)
+
+            return replace(
+                doc_out,
+                alignments = np.stack(alignments),
+                step_scores = np.array(scores),
+            )
+        elif self.args.stepsel == "askturnstep":
+            alignments = []
+            scores = []
+            for title, doc, steps, score in zip(
+                doc_out.titles, doc_out.docs,
+                doc_out.steps, doc_out.doc_scores,
+            ):
+                align = np.array([
+                    [self.stepprompt(dict(turn=turn, step=step)) for step in steps]
+                    for turn in turns
+                ])
+                import pdb; pdb.set_trace()
+                pred = align
+                alignments.append(pred)
                 # use the same score
                 scores.append(score)
 
