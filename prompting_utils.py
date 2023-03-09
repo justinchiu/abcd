@@ -367,6 +367,7 @@ class Aligner:
                 for i,(turn, topsteps) in enumerate(zip(turns, topksteps)):
                     turn2step = []
                     for step in topsteps:
+                        turn = turn.replace("user: ", "").replace("agent: ", "")
                         answer = self.stepprompt(dict(turn=turn, step=step))
                         print(self.stepprompt.print(dict(turn=turn, step=step)))
                         print(answer)
