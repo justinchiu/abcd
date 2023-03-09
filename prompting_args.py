@@ -21,7 +21,7 @@ def get_args():
     )
     parser.add_argument(
         "--stepsel",
-        choices=["lex", "model", "emb", "askdoc", "askturn", "askturnstep"],
+        choices=["lex", "model", "emb", "askdial", "askturn", "askturnstep"],
         default="lex",
     )
     parser.add_argument(

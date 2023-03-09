@@ -57,7 +57,7 @@ class StepKnnPrompt(EmbeddingPrompt):
             "scores": scores,
         }
 
-class DocAlignmentPrompt(TemplatePrompt):
+class DialAlignmentPrompt(TemplatePrompt):
     #template_file = "prompting/align.pmpt.tpl"
     #template_file = "prompting/zeroshotalign.pmpt.tpl"
     template_file = "prompting/original.pmpt.tpl"
@@ -91,6 +91,12 @@ class DocAlignmentPrompt(TemplatePrompt):
         return preds
 
 class AbcdTurnAlignmentPrompt(TemplatePrompt):
+    template_file = "prompting/abcd-turnalign.pmpt.tpl"
+
+class FloDialTurnAlignmentPrompt(TemplatePrompt):
+    template_file = "prompting/flodial-turnalign.pmpt.tpl"
+
+class AbcdTurnStepAlignmentPrompt(TemplatePrompt):
     template_file = "prompting/abcd-turnstepalign.pmpt.tpl"
 
 class FloDialTurnStepAlignmentPrompt(TemplatePrompt):
@@ -154,8 +160,8 @@ class Aligner:
 
         # setup align prompt
         completion_backend = backend.OpenAIChat if args.use_chat else backend.OpenAI
-        if args.stepsel == "askdoc":
-            self.stepprompt = DocAlignmentPrompt(completion_backend(
+        if args.stepsel == "askdial":
+            self.stepprompt = DialAlignmentPrompt(completion_backend(
                 model=self.model,
                 max_tokens=1024,
             ))
@@ -217,14 +223,11 @@ class Aligner:
                     self.bm25s[title].get_scores(turn.split())
                     for turn in turns
                 ]) # shape = turns x steps
-                preds, score = np.array(self.stepdecision(torch.tensor(scores)))
-                import pdb; pdb.set_trace()
+                preds, score = self.stepdecision(torch.tensor(scores))
+                preds = np.array(preds)
 
-
-                align_preds[1:][align_preds[1:] == align_preds[:-1]] = -1
-                align_score = scores.max(-1).sum()
-                alignments.append(align_preds)
-                step_scores.append(align_score)
+                alignments.append(preds)
+                step_scores.append(score)
 
             return replace(
                 doc_out,
@@ -251,7 +254,7 @@ class Aligner:
                 alignments = np.stack(alignments),
                 step_scores = np.array(step_scores),
             )
-        elif self.args.stepsel == "askdoc":
+        elif self.args.stepsel == "askdial":
             # just take the best one. no point asking for every doc.
             doc = doc_out.index(0)
             result = self.stepprompt(dict(dial=dial, doc=doc.doc))
