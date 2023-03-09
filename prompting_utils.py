@@ -308,13 +308,13 @@ class Aligner:
                 embscores = np.stack([
                     self.stepknnprompts[title](turn)["scores"] for turn in turns
                 ])
-                top3 = np.argsort(-embscores, -1)[:,:3]
-                top3steps = ["\n".join([
+                topk = np.argsort(-embscores, -1)[:,:6]
+                topksteps = ["\n".join([
                     f"Step {i}: {steps[idx]}" for i, idx in enumerate(idxs)
-                ]) for idxs in top3]
+                ]) for idxs in topk]
                 alignments.append(np.array([
                     self.stepprompt(dict(turn=turn, doc=topsteps))
-                    for turn, topsteps in zip(turns, top3steps)
+                    for turn, topsteps in zip(turns, topksteps)
                 ]))
                 # use the same score
                 scores.append(score)
