@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -8,7 +9,7 @@ def get_args():
     parser.add_argument("--dataset", choices=["abcd", "flodial", "sgd"], default="abcd")
     parser.add_argument("--use_chat", action="store_true")
     parser.add_argument("--embedding_model", default="text-embedding-ada-002")
-    parser.add_argument("--log_name", default="prompting")
+    parser.add_argument("--log_dir", default="promptlogs")
     parser.add_argument("--num_examples", default=25, type=int)
 
 
@@ -54,3 +55,17 @@ def get_args():
 
     return parser.parse_args()
 
+def get_logpath(args):
+    name = "-".join((
+        f"{args.dataset}",
+        f"n-{args.num_examples}",
+        f"ds-{args.docsel}",
+        f"ss-{args.stepsel}",
+        f"sd-{args.stepdec}",
+        f"r-{args.rerank}",
+        f"kd-{args.k_docs}",
+        f"ks-{args.k_steps}",
+        f"sp-{args.stepprompt}",
+        f"ds-{args.use_chat}",
+    ))
+    return Path(args.log_dir) / name
