@@ -104,10 +104,17 @@ class TurnStepAlignPrompt(TemplatePrompt):
         return out.strip() == "Yes"
 
 
-class AbcdTurnStepAlignPrompt(TemplatePrompt):
+class AbcdTurnAlignPrompt(TurnAlignPrompt):
+    template_file = "prompting/abcd-turnalign.pmpt.tpl"
+
+class FloDialTurnAlignPrompt(TurnAlignPrompt):
+    template_file = "prompting/flodial-turnalign.pmpt.tpl"
+
+
+class AbcdTurnStepAlignPrompt(TurnStepAlignPrompt):
     template_file = "prompting/abcd-turnstepalign.pmpt.tpl"
 
-class FloDialTurnStepAlignPrompt(TemplatePrompt):
+class FloDialTurnStepAlignPrompt(TurnStepAlignPrompt):
     template_file = "prompting/flodial-turnstepalign.pmpt.tpl"
 
 
@@ -175,12 +182,24 @@ class Aligner:
                 max_tokens=1024,
             ))
         elif args.stepsel == "askturn":
-            self.stepprompt = TurnAlignPrompt(completion_backend(
+            if args.stepprompt == "0s":
+                prompt = TurnAlignPrompt
+            elif args.dataset == "abcd":
+                prompt = AbcdTurnAlignPrompt
+            elif args.dataset == "flodial":
+                prompt = FloDialTurnAlignPrompt
+            self.stepprompt = prompt(completion_backend(
                 model=self.model,
                 max_tokens=2,
             ))
         elif args.stepsel == "askturnstep":
-            self.stepprompt = TurnStepAlignPrompt(completion_backend(
+            if args.stepprompt == "0s":
+                prompt = TurnStepAlignPrompt
+            elif args.dataset == "abcd":
+                prompt = AbcdTurnStepAlignPrompt
+            elif args.dataset == "flodial":
+                prompt = FloDialTurnStepAlignPrompt
+            self.stepprompt = (completion_backend(
                 model=self.model,
                 max_tokens=10,
             ))
@@ -298,6 +317,9 @@ class Aligner:
                 step_scores = np.array(scores),
             )
         elif self.args.stepsel == "askturnstep":
+            # don't run zeroshot
+            assert self.args.stepprompt != "0s"
+
             alignments = []
             scores = []
             for title, doc, steps, score in zip(
@@ -308,7 +330,6 @@ class Aligner:
                     [self.stepprompt(dict(turn=turn, step=step)) for step in steps]
                     for turn in turns
                 ])
-                import pdb; pdb.set_trace()
                 pred = align
                 alignments.append(pred)
                 # use the same score

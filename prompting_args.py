@@ -21,7 +21,10 @@ def get_args():
     )
     parser.add_argument(
         "--stepsel",
-        choices=["lex", "model", "emb", "askdial", "askturn", "askturnstep"],
+        choices=[
+            "lex", "model", "emb", "askdial",
+            "askturn", "askturnstep",
+        ],
         default="lex",
     )
     parser.add_argument(
@@ -43,9 +46,9 @@ def get_args():
     parser.add_argument(
         "--stepprompt",
         choices=[
-            "turnalign", "turnstepalign", "8shotturnalign",
+            "0s", "8s",
         ],
-        default="turnalign",
+        default="0s",
     )
 
     return parser.parse_args()
