@@ -92,10 +92,10 @@ def batch_monotonic_arg_max(unary):
 # renamed for prompting
 
 def amax(unary):
-    return unary.argmax(-1), unary.max(-1).sum().item()
+    return unary.argmax(-1), unary.max(-1).values.sum().item()
 
 def afirstmax(unary):
-    return first(unary.argmax(-1).cpu().numpy()), unary.max(-1).sum().item()
+    return first(unary.argmax(-1).cpu().numpy()), unary.max(-1).values.sum().item()
 
 def amono(unary):
     return monotonic_arg_max(unary)
