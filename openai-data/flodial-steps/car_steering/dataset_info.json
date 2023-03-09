@@ -6,6 +6,10 @@
       "dtype": "string",
       "_type": "Value"
     },
+    "id": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
     "embeddings": {
       "feature": {
         "dtype": "float64",

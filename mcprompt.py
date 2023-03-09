@@ -65,7 +65,10 @@ def main(args):
             print(f"Loading from {steppath}")
             step_embeddings = datasets.load_from_disk(steppath)
         else:
-            step_dataset = Dataset.from_list([{"text": x} for x in doc["steps"]])
+            step_dataset = Dataset.from_list([{
+                "text": x,
+                "id": i,
+            } for i, x in enumerate(doc["steps"])])
             step_embeddings = step_dataset.map(embed, batch_size=128, batched=True)
             step_embeddings.save_to_disk(steppath)
             print(f"Saved to {steppath}")
@@ -76,14 +79,14 @@ def main(args):
 
     with start_chain(args.log_name) as backend:
         # initialize decision model
-        aligner = Aligner(args, doc_embeddings, backend)
+        aligner = Aligner(args, doc_embeddings, doc_step_embeddings, backend)
 
         doc_acc = evaluate.load("accuracy")
         step_acc = evaluate.load("accuracy")
 
         doc_rec = evaluate.load("accuracy")
 
-        #for x in track(dialogues):
+        #for x in track(dialogues[:args.num_examples]):
         for x in dialogues[:args.num_examples]:
             id = x["id"]
             dial = x["dialogue"]

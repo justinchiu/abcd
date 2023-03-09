@@ -13,6 +13,8 @@ from rank_bm25 import BM25Okapi
 import openai
 from minichain import Prompt, EmbeddingPrompt, TemplatePrompt, show_log, start_chain
 
+from inference_utils import amax, afirstmax, amono, afirstmono
+
 EMBEDDING_MODEL = "text-embedding-ada-002"
 
 def embed(x):
@@ -40,6 +42,19 @@ class KnnPrompt(EmbeddingPrompt):
             "titles": res.examples["title"],
             "steps": res.examples["steps"],
             "scores": res.scores,
+        }
+
+class StepKnnPrompt(EmbeddingPrompt):
+    def find(self, out, input):
+        dataset, k = self.data
+        #res = dataset.get_nearest_examples("embeddings", np.array(out), k)
+        embs = np.array([x["embeddings"] for x in dataset])
+        scores = embs @ np.array(out)
+        return {
+            "query": input,
+            "steps": [x["text"] for x in dataset],
+            "ids": [x["id"] for x in dataset],
+            "scores": scores,
         }
 
 class StepAlignmentPrompt(TemplatePrompt):
@@ -107,14 +122,32 @@ class AlignOutput:
         )
 
 class Aligner:
-    def __init__(self, args, docs, backend):
+    def __init__(self, args, docs, doc_step_embs, backend):
         self.args = args
         self.docs = docs
+        self.doc_step_embs = doc_step_embs
+
         self.model = "gpt-3.5-turbo" if args.use_chat else "text-davinci-003"
+
+        if args.stepdec == "max":
+            self.stepdecision = amax
+        elif args.stepdec == "firstmax":
+            self.stepdecision = afirstmax
+        elif args.stepdec == "mono":
+            self.stepdecision = amono
+        elif args.stepdec == "firstmono":
+            self.stepdecision = afirstmono
+        else:
+            raise NotImplementedError
 
         # setup knn
         if args.docsel == "emb":
             self.knnprompt = KnnPrompt(backend.OpenAIEmbed(), (docs, args.k_docs))
+        if args.stepsel == "emb":
+            self.stepknnprompts = {
+                doc: StepKnnPrompt(backend.OpenAIEmbed(), (embs, 1))
+                for doc, embs in doc_step_embs.items()
+            }
 
         # setup align prompt
         completion_backend = backend.OpenAIChat if args.use_chat else backend.OpenAI
@@ -154,6 +187,8 @@ class Aligner:
                 steps = steps,
                 doc_scores = scores,
             )
+        elif self.args.docsel == "model":
+            raise NotImplementedError
         else:
             raise NotImplementedError
 
@@ -170,7 +205,10 @@ class Aligner:
                     self.bm25s[title].get_scores(turn.split())
                     for turn in turns
                 ]) # shape = turns x steps
-                align_preds = scores.argmax(-1)
+                preds, score = np.array(self.stepdecision(torch.tensor(scores)))
+                import pdb; pdb.set_trace()
+
+
                 align_preds[1:][align_preds[1:] == align_preds[:-1]] = -1
                 align_score = scores.max(-1).sum()
                 alignments.append(align_preds)
@@ -181,9 +219,26 @@ class Aligner:
                 alignments = np.stack(alignments),
                 step_scores = np.array(step_scores),
             )
-            #lexical_argmax = np.argmax(lexical_align_scores)
-            #lexical_docpred = lexical_alignments[lexical_argmax]
-            #lexical_doc = lexical_docpreds[lexical_argmax]
+        elif self.args.stepsel == "emb":
+            alignments = []
+            step_scores = []
+            for title, doc, steps, score in zip(
+                doc_out.titles, doc_out.docs,
+                doc_out.steps, doc_out.doc_scores,
+            ):
+                results = [self.stepknnprompts[title](turn) for turn in turns]
+                # turns x steps
+                scores = np.stack([x["scores"] for x in results])
+                preds, score = self.stepdecision(torch.tensor(scores))
+
+                alignments.append(preds)
+                step_scores.append(score)
+
+            return replace(
+                doc_out,
+                alignments = np.stack(alignments),
+                step_scores = np.array(step_scores),
+            )
         elif self.args.stepsel == "askdoc":
             # just take the best one. no point asking for every doc.
             doc = doc_out.index(0)

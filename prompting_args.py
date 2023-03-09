@@ -21,8 +21,13 @@ def get_args():
     )
     parser.add_argument(
         "--stepsel",
-        choices=["lex", "model", "askdoc", "askturn", "askturnstep"],
+        choices=["lex", "model", "emb", "askdoc", "askturn", "askturnstep"],
         default="lex",
+    )
+    parser.add_argument(
+        "--stepdec",
+        choices=["max", "mono", "firstmax", "firstmono"],
+        default="max",
     )
     parser.add_argument(
         "--rerank",

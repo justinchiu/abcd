@@ -68,13 +68,13 @@ def monotonic_arg_max(unary):
     full_potentials = potentials + log_transition
     crf = LinearChainCRF(full_potentials[None])
     binary_argmax = crf.argmax.detach()
-    return binary_argmax.nonzero()[:,2], crf.max.detach()
+    return binary_argmax.nonzero()[:,2].cpu().numpy(), crf.max.item()
 
 
 def first_monotonic_arg_max(unary):
     preds, score = monotonic_arg_max(unary)
-    preds = first(preds.cpu().numpy())
-    return preds.numpy(), score.item()
+    preds = first(preds)
+    return preds.numpy(), score
 
 def batch_monotonic_arg_max(unary):
     N, T, Z = unary.shape
@@ -88,3 +88,17 @@ def batch_monotonic_arg_max(unary):
     crf = LinearChainCRF(full_potentials)
     binary_argmax = crf.argmax.detach().cpu()
     return [x.nonzero()[:,2] for x in binary_argmax], crf.max.detach()
+
+# renamed for prompting
+
+def amax(unary):
+    return unary.argmax(-1), unary.max(-1).sum().item()
+
+def afirstmax(unary):
+    return first(unary.argmax(-1).cpu().numpy()), unary.max(-1).sum().item()
+
+def amono(unary):
+    return monotonic_arg_max(unary)
+
+def afirstmono(unary):
+    return first_monotonic_arg_max(unary)
