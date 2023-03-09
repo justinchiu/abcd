@@ -168,11 +168,10 @@ class Aligner:
         # setup knn
         if args.docsel == "emb":
             self.knnprompt = KnnPrompt(backend.OpenAIEmbed(), (docs, args.k_docs))
-        if args.stepsel == "emb":
-            self.stepknnprompts = {
-                doc: StepKnnPrompt(backend.OpenAIEmbed(), (embs, 1))
-                for doc, embs in doc_step_embs.items()
-            }
+        self.stepknnprompts = {
+            doc: StepKnnPrompt(backend.OpenAIEmbed(), (embs, 1))
+            for doc, embs in doc_step_embs.items()
+        }
 
         # setup align prompt
         completion_backend = backend.OpenAIChat if args.use_chat else backend.OpenAI
@@ -271,7 +270,7 @@ class Aligner:
                 doc_out.titles, doc_out.docs,
                 doc_out.steps, doc_out.doc_scores,
             ):
-                results = [self.stepknnprompts[title](turn) for turn in turns]
+                results = [self.stepknnprompts[title](turn)["scores"] for turn in turns]
                 # turns x steps
                 scores = np.stack([x["scores"] for x in results])
                 preds, score = self.stepdecision(torch.tensor(scores))
@@ -305,8 +304,17 @@ class Aligner:
                 doc_out.titles, doc_out.docs,
                 doc_out.steps, doc_out.doc_scores,
             ):
+                # pre-filter using embedding
+                embscores = np.stack([
+                    self.stepknnprompts[title](turn)["scores"] for turn in turns
+                ])
+                top3 = np.argsort(-embscores, -1)[:,:3]
+                top3steps = ["\n".join([
+                    f"Step {i}: {steps[idx]}" for i, idx in enumerate(idxs)
+                ]) for idxs in top3]
                 alignments.append(np.array([
-                    self.stepprompt(dict(turn=turn, doc=doc)) for turn in turns
+                    self.stepprompt(dict(turn=turn, doc=topsteps))
+                    for turn, topsteps in zip(turns, top3steps)
                 ]))
                 # use the same score
                 scores.append(score)
