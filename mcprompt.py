@@ -32,9 +32,11 @@ def main(args):
     if args.dataset == "abcd":
         doc_obj = Abcd()
         data_path = Path("openai-data/guideline-docs.data")
+        step_path = Path("openai-data/abcd-steps")
     elif args.dataset == "flodial":
         doc_obj = FloDial()
         data_path = Path("openai-data/flodial-guideline-docs.data")
+        step_path = Path("openai-data/flodial-steps")
     else:
         raise NotImplementedError(f"Unimplemented dataset {args.dataset}")
 
@@ -49,10 +51,26 @@ def main(args):
     else:
         print("WARNING: rerunning embedding")
         doc_dataset = get_docs()
-        doc_embeddings = dataset.map(embed, batch_size=128, batched=True)
+        doc_embeddings = doc_dataset.map(embed, batch_size=128, batched=True)
         doc_embeddings.save_to_disk(data_path)
         print(f"Saved to {data_path}")
     doc_embeddings.add_faiss_index("embeddings")
+
+
+    doc_step_embeddings = {}
+    for doc in doc_embeddings:
+        title = doc["title"]
+        steppath = step_path / title
+        if steppath.exists():
+            print(f"Loading from {steppath}")
+            step_embeddings = datasets.load_from_disk(steppath)
+        else:
+            step_dataset = Dataset.from_list([{"text": x} for x in doc["steps"]])
+            step_embeddings = step_dataset.map(embed, batch_size=128, batched=True)
+            step_embeddings.save_to_disk(steppath)
+            print(f"Saved to {steppath}")
+        step_embeddings.add_faiss_index("embeddings")
+        doc_step_embeddings[title] = step_embeddings
 
     dialogues, labels = get_dialogues_and_labels()
 

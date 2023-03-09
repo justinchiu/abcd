@@ -16,7 +16,7 @@ from minichain import Prompt, EmbeddingPrompt, TemplatePrompt, show_log, start_c
 EMBEDDING_MODEL = "text-embedding-ada-002"
 
 def embed(x):
-    emb = openai.Embedding.create(input=x["doc"], engine=EMBEDDING_MODEL)
+    emb = openai.Embedding.create(input=x["text"], engine=EMBEDDING_MODEL)
     return {"embeddings": [
         np.array(emb['data'][i]['embedding'])
         for i in range(len(emb["data"]))

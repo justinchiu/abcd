@@ -17,7 +17,7 @@ class Abcd:
                 actions = content["actions"]
                 strings = [content["instructions"][0]]
                 for step in actions:
-                    stepstring = step["text"] + " ".join(step["subtext"])
+                    stepstring = step["text"] + " " + " ".join(step["subtext"])
                     strings.append(stepstring)
                 strings.append(content["instructions"][1])
                 numbered_steps = [
@@ -26,6 +26,7 @@ class Abcd:
                 ]
                 docs.append({
                     "doc": "\n".join(numbered_steps),
+                    "text": "\n".join(numbered_steps),
                     "title": subflow,
                     "steps": strings,
                 })
@@ -85,6 +86,7 @@ class FloDial:
                 ]
                 docs.append({
                     "doc": "\n".join(numbered_steps),
+                    "text": "\n".join(numbered_steps),
                     "title": doc["name"],
                     "steps": flow,
                     "nodes": flow,

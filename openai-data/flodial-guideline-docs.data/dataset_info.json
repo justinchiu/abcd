@@ -6,6 +6,10 @@
       "dtype": "string",
       "_type": "Value"
     },
+    "text": {
+      "dtype": "string",
+      "_type": "Value"
+    },
     "title": {
       "dtype": "string",
       "_type": "Value"
