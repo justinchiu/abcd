@@ -89,8 +89,15 @@ def main(args):
             true_labels = np.array(labels[id], dtype=int)
             all_wrong = np.full(true_labels.shape, -2)
 
+            print()
+            print(f"Dialogue {id}")
+            print(true_labels)
+            print(true_doc)
+
             # DOCUMENT SCORING
             doc_selection = aligner.select_docs(dial)
+            print("docs selected")
+            print(doc_selection.titles)
 
             # STEP PREDICTION
             step_align = aligner.select_steps(dial, turns, doc_selection)

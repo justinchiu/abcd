@@ -26,7 +26,7 @@ def get_args():
             "lex", "model", "emb", "askdial",
             "askturn", "askturnstep",
         ],
-        default="lex",
+        default="emb",
     )
     parser.add_argument(
         "--stepdec",
