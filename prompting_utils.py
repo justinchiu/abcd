@@ -326,6 +326,7 @@ class Aligner:
                 for i, (turn, topsteps) in enumerate(zip(turns, topksteps)):
                     answer = self.stepprompt(dict(turn=turn, doc=topsteps))
                     align.append(topk[i,answer])
+                    print(turn.split()[0])
                     print(self.stepprompt.print(dict(turn=turn, doc=topsteps)))
                     print(answer)
                     import pdb; pdb.set_trace()
@@ -354,6 +355,8 @@ class Aligner:
                 doc_out.titles, doc_out.docs,
                 doc_out.steps, doc_out.doc_scores,
             ):
+                print()
+                print(title)
                 # pre-filter using embedding
                 embscores = np.stack([
                     self.stepknnprompts[title](turn)["scores"] for turn in turns
@@ -367,7 +370,7 @@ class Aligner:
                 for i,(turn, topsteps) in enumerate(zip(turns, topksteps)):
                     turn2step = []
                     for step in topsteps:
-                        turn = turn.replace("user: ", "").replace("agent: ", "")
+                        turn = turn.replace("user: ", "").replace("agent: ", "").replace("customer: ", "")
                         answer = self.stepprompt(dict(turn=turn, step=step))
                         print(self.stepprompt.print(dict(turn=turn, step=step)))
                         print(answer)
