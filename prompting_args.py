@@ -12,6 +12,8 @@ def get_args():
     parser.add_argument("--log_dir", default="promptlogs")
     parser.add_argument("--num_examples", default=25, type=int)
 
+    parser.add_argument("--first_label", action="store_true")
+
 
     # decision options
     parser.add_argument_group("decision")
@@ -58,6 +60,7 @@ def get_args():
 def get_logpath(args):
     name = "-".join((
         f"{args.dataset}",
+        f"fl-{args.first_label}",
         f"n-{args.num_examples}",
         f"ds-{args.docsel}",
         f"ss-{args.stepsel}",

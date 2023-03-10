@@ -85,8 +85,9 @@ def main(args):
             true_doc = x["doc"]
             speakers = x["speakers"]
             turns = x["turns"]
-            #true_labels = first(np.array(labels[id], dtype=int))
             true_labels = np.array(labels[id], dtype=int)
+            if args.first_label:
+                true_labels = first(np.array(labels[id], dtype=int))
             all_wrong = np.full(true_labels.shape, -2)
 
             # DOCUMENT SCORING
