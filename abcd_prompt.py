@@ -18,15 +18,22 @@ from prompting_data import Abcd, FloDial
 from prompting_utils import embed, Aligner
 
 
-def get_guidelines(self, guidelines):
+def get_guidelines(guidelines):
     docs = []
     for flow, subflow_dict in guidelines.items():
         for subflow, content in subflow_dict["subflows"].items():
             actions = content["actions"]
             strings = [content["instructions"][0]]
+            substeps = [content["instructions"][0]]
+            substep_to_step = [0]
+            step_idx = 1
             for step in actions:
                 stepstring = step["text"] + " " + " ".join(step["subtext"])
                 strings.append(stepstring)
+                for substep in step["subtext"]:
+                    substeps.append(substep)
+                    substep_to_step.append(step_idx)
+                step_idx += 1
             strings.append(content["instructions"][1])
             numbered_steps = [
                 f"Step {i}: {x}"
@@ -37,13 +44,16 @@ def get_guidelines(self, guidelines):
                 "text": "\n".join(numbered_steps),
                 "title": subflow,
                 "steps": strings,
+                "substeps": substeps,
+                "substep_to_step": substep_to_step,
             })
+            import pdb; pdb.set_trace()
     return docs
 
-def get_docs(self):
+def get_docs():
     with Path("data/guidelines.json").open("r") as f:
         guidelines = json.load(f)
-        docs = self.get_guidelines(guidelines)
+        docs = get_guidelines(guidelines)
         return docs
 
 class ExpandPrompt(Prompt[str,str]):
@@ -59,11 +69,9 @@ def main():
     data_path = Path("openai-data/guideline-docs.data")
     step_path = Path("openai-data/abcd-steps")
 
-    get_docs = doc_obj.get_docs
     get_dialogues_and_labels = doc_obj.get_dialogues_and_labels
 
     doc_dataset = get_docs()
-
     dialogues, labels = get_dialogues_and_labels()
 
     with start_chain("promptlogs/chatgpt-chat-expansion") as backend:
